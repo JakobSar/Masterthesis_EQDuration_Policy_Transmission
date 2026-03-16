@@ -28,6 +28,16 @@ class SeriesPullConfig:
     min_asof_date: pd.Timestamp = pd.Timestamp("1900-01-01")
     force_refresh: bool = False
     cache_only: bool = False
+    skip_known_bad_ids: bool = True
+    bad_id_cooldown_days: int = 30
+    series_specs: tuple["SeriesFieldSpec", ...] | None = None
+
+
+@dataclass(frozen=True)
+class SeriesFieldSpec:
+    output_col: str
+    fields: tuple[str, ...]
+    intervals: tuple[str, ...] | None = None
 
 
 def _clean_str(s: pd.Series) -> pd.Series:
@@ -43,24 +53,57 @@ def _ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def load_bad_ids(path: Path) -> set[str]:
+BAD_IDS_COLUMNS = ["firm_id", "last_failed_at", "reason", "n_candidates", "tried_ids"]
+
+
+def _load_bad_ids_table(path: Path) -> pd.DataFrame:
     if not path.exists():
-        return set()
+        return pd.DataFrame(columns=BAD_IDS_COLUMNS)
     try:
         d = pd.read_csv(path)
-        if "bad_id_key" not in d.columns:
-            return set()
-        return set(d["bad_id_key"].dropna().astype(str).str.strip().tolist())
     except Exception:
+        return pd.DataFrame(columns=BAD_IDS_COLUMNS)
+    for c in BAD_IDS_COLUMNS:
+        if c not in d.columns:
+            d[c] = pd.NA
+    d = d[BAD_IDS_COLUMNS].copy()
+    d["firm_id"] = d["firm_id"].astype("string").str.strip()
+    d["last_failed_at"] = pd.to_datetime(d["last_failed_at"], errors="coerce").dt.normalize()
+    d = d.dropna(subset=["firm_id", "last_failed_at"]).copy()
+    d = d.sort_values(["firm_id", "last_failed_at"]).drop_duplicates(subset=["firm_id"], keep="last")
+    return d.reset_index(drop=True)
+
+
+def load_bad_firm_ids(path: Path, cooldown_days: int = 30) -> set[str]:
+    d = _load_bad_ids_table(path)
+    if d.empty:
         return set()
+    if cooldown_days is not None and cooldown_days > 0:
+        cutoff = pd.Timestamp.utcnow().normalize() - pd.Timedelta(days=int(cooldown_days))
+        d = d[d["last_failed_at"] >= cutoff].copy()
+    return set(d["firm_id"].dropna().astype(str).tolist())
 
 
-def save_bad_ids(path: Path, bad_ids: set[str]) -> None:
+def append_bad_ids_rows(path: Path, rows: list[dict]) -> pd.DataFrame:
+    old = _load_bad_ids_table(path)
+    if rows:
+        new = pd.DataFrame(rows)
+        for c in BAD_IDS_COLUMNS:
+            if c not in new.columns:
+                new[c] = pd.NA
+        new = new[BAD_IDS_COLUMNS].copy()
+        new["firm_id"] = new["firm_id"].astype("string").str.strip()
+        new["last_failed_at"] = pd.to_datetime(new["last_failed_at"], errors="coerce").dt.normalize()
+        out = pd.concat([old, new], ignore_index=True)
+    else:
+        out = old.copy()
+    out = out.dropna(subset=["firm_id", "last_failed_at"]).copy()
+    out = out.sort_values(["firm_id", "last_failed_at"]).drop_duplicates(subset=["firm_id"], keep="last")
     _ensure_parent(path)
-    out = pd.DataFrame({"bad_id_key": sorted(set(str(x).strip() for x in bad_ids if str(x).strip()))})
     tmp = path.with_suffix(path.suffix + ".tmp")
     out.to_csv(tmp, index=False)
     tmp.replace(path)
+    return out.reset_index(drop=True)
 
 
 def normalize_step_rows(df: pd.DataFrame, output_col: str) -> pd.DataFrame:
@@ -118,9 +161,10 @@ def build_company_candidates(company_req: pd.DataFrame) -> list[tuple[str, str]]
     return out
 
 
-def extract_history(raw: pd.DataFrame, output_col: str, field_hint: str) -> pd.DataFrame:
+def extract_history_multi(raw: pd.DataFrame, specs: list[SeriesFieldSpec]) -> pd.DataFrame:
+    output_cols = [sp.output_col for sp in specs]
     if raw is None or len(raw) == 0:
-        return pd.DataFrame(columns=["date", output_col])
+        return pd.DataFrame(columns=["date", *output_cols])
 
     x = raw.copy()
     date_col = None
@@ -138,53 +182,65 @@ def extract_history(raw: pd.DataFrame, output_col: str, field_hint: str) -> pd.D
             id_like.add(c)
 
     value_cols = [c for c in x.columns if c != date_col and c not in id_like]
-    val_col = None
 
-    for c in value_cols:
-        uc = str(c).upper().replace(" ", "")
-        if field_hint.upper().replace(" ", "") in uc:
-            val_col = c
-            break
+    def _norm(t: str) -> str:
+        return str(t).upper().replace(" ", "")
 
-    if val_col is None and len(value_cols) == 1:
-        val_col = value_cols[0]
+    value_cols_norm = {c: _norm(c) for c in value_cols}
 
-    if val_col is None:
-        for c in value_cols:
-            sc = pd.to_numeric(x[c], errors="coerce")
-            if int(sc.notna().sum()) > 0:
-                val_col = c
+    out = pd.DataFrame({"date": pd.to_datetime(x[date_col], errors="coerce").dt.normalize()})
+    out = out.dropna(subset=["date"]).sort_values("date").drop_duplicates(["date"], keep="last")
+
+    for sp in specs:
+        picked = None
+        for f in sp.fields:
+            fn = _norm(f)
+            for c in value_cols:
+                if fn in value_cols_norm[c]:
+                    picked = c
+                    break
+            if picked is not None:
                 break
 
-    if val_col is None:
-        return pd.DataFrame(columns=["date", output_col])
+        if picked is None and len(value_cols) == 1 and len(specs) == 1:
+            picked = value_cols[0]
 
-    out = pd.DataFrame(
-        {
-            "date": pd.to_datetime(x[date_col], errors="coerce").dt.normalize(),
-            output_col: pd.to_numeric(x[val_col], errors="coerce"),
-        }
-    )
-    out = out.dropna(subset=["date"]).sort_values("date").drop_duplicates(["date"], keep="last")
-    return out[["date", output_col]]
+        if picked is None:
+            out[sp.output_col] = np.nan
+        else:
+            tmp = pd.DataFrame(
+                {
+                    "date": pd.to_datetime(x[date_col], errors="coerce").dt.normalize(),
+                    sp.output_col: pd.to_numeric(x[picked], errors="coerce"),
+                }
+            )
+            tmp = tmp.dropna(subset=["date"]).sort_values("date").drop_duplicates(["date"], keep="last")
+            out = out.merge(tmp, on="date", how="left")
+
+    return out[["date", *output_cols]]
 
 
-def map_history_to_asof(req_dates: pd.Series, hist: pd.DataFrame, output_col: str, tol_days: int) -> pd.DataFrame:
+def map_history_to_asof_multi(req_dates: pd.Series, hist: pd.DataFrame, output_cols: list[str], tol_days: int) -> pd.DataFrame:
     left = pd.DataFrame({"date": pd.to_datetime(req_dates, errors="coerce").dt.normalize()}).dropna().sort_values("date")
     if left.empty:
-        return pd.DataFrame(columns=["date", output_col])
+        return pd.DataFrame(columns=["date", *output_cols])
     if hist is None or hist.empty:
-        left[output_col] = np.nan
+        for c in output_cols:
+            left[c] = np.nan
         return left
 
-    right = hist[["date", output_col]].copy()
+    keep_cols = ["date", *[c for c in output_cols if c in hist.columns]]
+    right = hist[keep_cols].copy()
     right["date"] = pd.to_datetime(right["date"], errors="coerce").dt.normalize()
-    right[output_col] = pd.to_numeric(right[output_col], errors="coerce")
+    for c in output_cols:
+        if c not in right.columns:
+            right[c] = np.nan
+        right[c] = pd.to_numeric(right[c], errors="coerce")
     right = right.dropna(subset=["date"]).sort_values("date").drop_duplicates(["date"], keep="last")
 
     return pd.merge_asof(
         left,
-        right,
+        right[["date", *output_cols]],
         on="date",
         direction="backward",
         tolerance=pd.Timedelta(days=tol_days),
@@ -202,6 +258,9 @@ class StandardSeriesPuller:
         bad_rows_log_path: Path,
     ) -> None:
         self.cfg = config
+        self.series_specs = self._resolve_series_specs()
+        self.output_cols = [sp.output_col for sp in self.series_specs]
+        self.primary_col = self.output_cols[0]
         self.cache_dir = cache_dir
         self.step_rows_path = step_rows_path
         self.checkpoint_path = checkpoint_path
@@ -213,6 +272,36 @@ class StandardSeriesPuller:
         _ensure_parent(self.bad_ids_path)
         _ensure_parent(self.bad_rows_log_path)
 
+    def _resolve_series_specs(self) -> list[SeriesFieldSpec]:
+        if self.cfg.series_specs:
+            specs = list(self.cfg.series_specs)
+            if len(specs) == 0:
+                raise ValueError("series_specs is empty.")
+            return specs
+        fields = [self.cfg.field]
+        if self.cfg.fallback_field and self.cfg.fallback_field != self.cfg.field:
+            fields.append(self.cfg.fallback_field)
+        return [SeriesFieldSpec(output_col=self.cfg.output_col, fields=tuple(fields), intervals=None)]
+
+    def _empty_hist(self) -> pd.DataFrame:
+        return pd.DataFrame(columns=["date", *self.output_cols])
+
+    def _normalize_step_rows_frame(self, df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["firm_id", "date", *self.output_cols, "rank", "id_type", "pull_id"])
+        x = df.copy()
+        x["date"] = pd.to_datetime(x.get("date"), errors="coerce").dt.normalize()
+        for c in self.output_cols:
+            if c not in x.columns:
+                x[c] = np.nan
+            x[c] = pd.to_numeric(x[c], errors="coerce")
+        for c in ["rank", "id_type", "pull_id"]:
+            if c not in x.columns:
+                x[c] = pd.NA
+        x = x[["firm_id", "date", *self.output_cols, "rank", "id_type", "pull_id"]]
+        x = x.dropna(subset=["firm_id", "date"]).sort_values(["firm_id", "date"]).drop_duplicates(["firm_id", "date"], keep="last")
+        return x.reset_index(drop=True)
+
     def _cache_path_for_company_id(self, firm_id: str, id_type: str, pull_id: str) -> Path:
         base = _safe_name(firm_id).replace(".parquet", "")
         suffix = _safe_name(f"{id_type}_{pull_id}")
@@ -220,24 +309,28 @@ class StandardSeriesPuller:
 
     def _load_cache(self, path: Path) -> pd.DataFrame:
         if not path.exists():
-            return pd.DataFrame(columns=["date", self.cfg.output_col])
+            return self._empty_hist()
         try:
             d = pd.read_parquet(path).copy()
         except Exception:
-            return pd.DataFrame(columns=["date", self.cfg.output_col])
+            return self._empty_hist()
         if "date" not in d.columns:
-            return pd.DataFrame(columns=["date", self.cfg.output_col])
-        if self.cfg.output_col not in d.columns:
-            d[self.cfg.output_col] = np.nan
+            return self._empty_hist()
         d["date"] = pd.to_datetime(d["date"], errors="coerce").dt.normalize()
-        d[self.cfg.output_col] = pd.to_numeric(d[self.cfg.output_col], errors="coerce")
+        for c in self.output_cols:
+            if c not in d.columns:
+                d[c] = np.nan
+            d[c] = pd.to_numeric(d[c], errors="coerce")
         d = d.dropna(subset=["date"]).sort_values("date").drop_duplicates(["date"], keep="last")
-        return d[["date", self.cfg.output_col]]
+        return d[["date", *self.output_cols]]
 
     def _save_cache(self, path: Path, df: pd.DataFrame) -> None:
         d = df.copy()
         d["date"] = pd.to_datetime(d["date"], errors="coerce").dt.normalize()
-        d[self.cfg.output_col] = pd.to_numeric(d[self.cfg.output_col], errors="coerce")
+        for c in self.output_cols:
+            if c not in d.columns:
+                d[c] = np.nan
+            d[c] = pd.to_numeric(d[c], errors="coerce")
         d = d.dropna(subset=["date"]).sort_values("date").drop_duplicates(["date"], keep="last")
         _ensure_parent(path)
         tmp = path.with_suffix(path.suffix + ".tmp")
@@ -246,45 +339,53 @@ class StandardSeriesPuller:
 
     def _pull_segment(self, pull_id: str, start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, bool]:
         if pd.isna(start) or pd.isna(end) or start > end:
-            return pd.DataFrame(columns=["date", self.cfg.output_col]), False
+            return self._empty_hist(), False
 
-        fields = [self.cfg.field]
-        if self.cfg.fallback_field and self.cfg.fallback_field != self.cfg.field:
-            fields.append(self.cfg.fallback_field)
+        all_fields = []
+        intervals = []
+        for sp in self.series_specs:
+            for f in sp.fields:
+                if f not in all_fields:
+                    all_fields.append(f)
+            use_intervals = sp.intervals if sp.intervals else self.cfg.intervals
+            for iv in use_intervals:
+                if iv not in intervals:
+                    intervals.append(iv)
 
-        for field_name in fields:
-            for interval in self.cfg.intervals:
-                last_err = None
-                for r in range(self.cfg.max_retries):
-                    try:
-                        raw = ld.get_history(
-                            universe=[pull_id],
-                            fields=[field_name],
-                            start=start.strftime("%Y-%m-%d"),
-                            end=end.strftime("%Y-%m-%d"),
-                            interval=interval,
-                        )
-                        out = extract_history(raw, output_col=self.cfg.output_col, field_hint=self.cfg.field)
-                        if not out.empty:
-                            return out, False
-                        break
-                    except Exception as e:
-                        last_err = e
-                        msg = str(e)
-                        if "Unable to resolve all requested identifiers" in msg:
-                            return pd.DataFrame(columns=["date", self.cfg.output_col]), True
-                        time.sleep(self.cfg.base_sleep_sec * (2**r) + random.random() * 0.3)
-                if last_err is not None:
-                    continue
-        return pd.DataFrame(columns=["date", self.cfg.output_col]), False
+        for interval in intervals:
+            last_err = None
+            for r in range(self.cfg.max_retries):
+                try:
+                    raw = ld.get_history(
+                        universe=[pull_id],
+                        fields=all_fields,
+                        start=start.strftime("%Y-%m-%d"),
+                        end=end.strftime("%Y-%m-%d"),
+                        interval=interval,
+                    )
+                    out = extract_history_multi(raw, self.series_specs)
+                    has_values = bool(out[self.output_cols].notna().any().any()) if (not out.empty) else False
+                    if has_values:
+                        return out, False
+                    break
+                except Exception as e:
+                    last_err = e
+                    msg = str(e)
+                    if "Unable to resolve all requested identifiers" in msg:
+                        return self._empty_hist(), True
+                    time.sleep(self.cfg.base_sleep_sec * (2 ** r) + random.random() * 0.3)
+            if last_err is not None:
+                continue
+
+        return self._empty_hist(), False
 
     def _update_company_cache(
         self, firm_id: str, id_type: str, pull_id: str, start: pd.Timestamp, end: pd.Timestamp
     ) -> tuple[pd.DataFrame, bool]:
         path = self._cache_path_for_company_id(firm_id, id_type, pull_id)
-        cached = pd.DataFrame(columns=["date", self.cfg.output_col]) if self.cfg.force_refresh else self._load_cache(path)
+        cached = self._empty_hist() if self.cfg.force_refresh else self._load_cache(path)
 
-        has_values = bool(pd.to_numeric(cached.get(self.cfg.output_col), errors="coerce").notna().any()) if not cached.empty else False
+        has_values = bool(pd.to_numeric(cached.get(self.primary_col), errors="coerce").notna().any()) if not cached.empty else False
         if (
             (not cached.empty)
             and (not self.cfg.force_refresh)
@@ -298,11 +399,7 @@ class StandardSeriesPuller:
 
         pulled, permanent_bad_id = self._pull_segment(pull_id=pull_id, start=start, end=end)
         frames = [x for x in [cached, pulled] if not x.empty]
-        out = (
-            pd.concat(frames, ignore_index=True).sort_values("date").drop_duplicates(["date"], keep="last")
-            if frames
-            else pd.DataFrame(columns=["date", self.cfg.output_col])
-        )
+        out = pd.concat(frames, ignore_index=True).sort_values("date").drop_duplicates(["date"], keep="last") if frames else self._empty_hist()
         if (not out.empty) or self.cfg.force_refresh:
             self._save_cache(path, out)
         return out, permanent_bad_id
@@ -319,22 +416,13 @@ class StandardSeriesPuller:
         if req.empty:
             raise ValueError("No valid request rows after cleaning.")
 
-        company_candidates_map = {
-            str(fid): build_company_candidates(g) for fid, g in req.groupby("firm_id", sort=False)
-        }
+        company_candidates_map = {str(fid): build_company_candidates(g) for fid, g in req.groupby("firm_id", sort=False)}
         companies_all = req["firm_id"].dropna().astype(str).unique().tolist()
         companies_total = len(companies_all)
 
-        existing_step_rows = (
-            normalize_step_rows(pd.read_parquet(self.step_rows_path), self.cfg.output_col)
-            if self.step_rows_path.exists()
-            else pd.DataFrame(columns=["firm_id", "date", self.cfg.output_col, "rank", "id_type", "pull_id"])
-        )
+        existing_step_rows = self._normalize_step_rows_frame(pd.read_parquet(self.step_rows_path)) if self.step_rows_path.exists() else self._normalize_step_rows_frame(pd.DataFrame())
         processed_from_rows = set(
-            existing_step_rows.loc[pd.to_numeric(existing_step_rows[self.cfg.output_col], errors="coerce").notna(), "firm_id"]
-            .dropna()
-            .astype(str)
-            .tolist()
+            existing_step_rows.loc[pd.to_numeric(existing_step_rows[self.primary_col], errors="coerce").notna(), "firm_id"].dropna().astype(str).tolist()
         )
 
         processed_from_ckpt = set()
@@ -351,22 +439,30 @@ class StandardSeriesPuller:
 
         processed_companies = set(processed_from_rows) | set(processed_from_ckpt)
         companies = [c for c in companies_all if str(c) not in processed_companies]
-        bad_ids = load_bad_ids(self.bad_ids_path)
+        bad_hist_before = _load_bad_ids_table(self.bad_ids_path)
+        bad_before_set = set(bad_hist_before["firm_id"].astype(str).tolist()) if not bad_hist_before.empty else set()
+        known_bad_recent = (
+            load_bad_firm_ids(self.bad_ids_path, cooldown_days=self.cfg.bad_id_cooldown_days)
+            if (self.cfg.skip_known_bad_ids and (not self.cfg.force_refresh))
+            else set()
+        )
+        pre_bad_skip = len([c for c in companies if str(c) in known_bad_recent])
+        if pre_bad_skip > 0:
+            companies = [c for c in companies if str(c) not in known_bad_recent]
 
         print("\n" + "=" * 88)
         print("Standard Series Pull Overview")
         print("=" * 88)
-        print(f"field: {self.cfg.field} -> output_col: {self.cfg.output_col}")
+        print("series_specs:", ", ".join([f"{sp.output_col}<-{list(sp.fields)}" for sp in self.series_specs]))
         print(f"request_rows: {len(req):,} | companies_total: {companies_total:,} | remaining: {len(companies):,}")
         print(f"mode: {'CACHE_ONLY' if self.cfg.cache_only else 'CACHE+NETWORK'} | batch_size: {self.cfg.batch_size}")
-        print(f"known_bad_ids: {len(bad_ids):,} ({self.bad_ids_path.name})")
+        print(f"known_bad_ids: {len(bad_hist_before):,} ({self.bad_ids_path.name})")
         print("=" * 88)
 
         total_cand_calls = 0
         total_resolved = 0
         total_unresolved = 0
-        total_bad_id_skips = 0
-        total_bad_ids_added = 0
+        total_bad_id_skips = int(pre_bad_skip)
         bad_rows: list[dict] = []
         n_batches = int(np.ceil(len(companies) / self.cfg.batch_size)) if companies else 0
         new_rows_out: list[dict] = []
@@ -390,7 +486,8 @@ class StandardSeriesPuller:
                     end = pd.to_datetime(req_dates.max()).normalize()
 
                     panel = pd.DataFrame({"date": req_dates})
-                    panel[self.cfg.output_col] = np.nan
+                    for c in self.output_cols:
+                        panel[c] = np.nan
                     panel["rank"] = pd.NA
                     panel["id_type"] = pd.NA
                     panel["pull_id"] = pd.NA
@@ -398,24 +495,18 @@ class StandardSeriesPuller:
                     attempted_ids: list[str] = []
                     cands = company_candidates_map.get(str(firm_id), [])
                     cand_used = 0
-                    skipped_bad = 0
 
                     for rank, (cand_type, cand_id) in enumerate(cands, start=1):
-                        if panel[self.cfg.output_col].notna().all():
+                        if panel[self.output_cols].notna().all().all():
                             break
                         cand_type = str(cand_type).upper().strip()
                         cand_id = str(cand_id).strip()
                         if not cand_type or not cand_id:
                             continue
 
-                        bad_key = f"{cand_type}:{cand_id}"
-                        if bad_key in bad_ids:
-                            skipped_bad += 1
-                            continue
-
                         cand_used += 1
                         total_cand_calls += 1
-                        attempted_ids.append(bad_key)
+                        attempted_ids.append(f"{cand_type}:{cand_id}")
 
                         hist, permanent_bad_id = self._update_company_cache(
                             firm_id=str(firm_id),
@@ -424,63 +515,56 @@ class StandardSeriesPuller:
                             start=start,
                             end=end,
                         )
-
                         if permanent_bad_id:
-                            if bad_key not in bad_ids:
-                                bad_ids.add(bad_key)
-                                total_bad_ids_added += 1
                             continue
 
-                        mapped = map_history_to_asof(req_dates, hist, output_col=self.cfg.output_col, tol_days=self.cfg.asof_tolerance_days)
-                        panel = panel.merge(mapped.rename(columns={self.cfg.output_col: f"{self.cfg.output_col}_cand"}), on="date", how="left")
-                        fill_mask = panel[self.cfg.output_col].isna() & panel[f"{self.cfg.output_col}_cand"].notna()
-                        panel.loc[fill_mask, self.cfg.output_col] = panel.loc[fill_mask, f"{self.cfg.output_col}_cand"]
-                        panel.loc[fill_mask, "rank"] = rank
-                        panel.loc[fill_mask, "id_type"] = cand_type
-                        panel.loc[fill_mask, "pull_id"] = cand_id
-                        panel = panel.drop(columns=[f"{self.cfg.output_col}_cand"])
+                        mapped = map_history_to_asof_multi(req_dates, hist, output_cols=self.output_cols, tol_days=self.cfg.asof_tolerance_days)
+                        panel = panel.merge(mapped.rename(columns={c: f"{c}_cand" for c in self.output_cols}), on="date", how="left")
+                        any_filled = False
+                        for c in self.output_cols:
+                            fill_mask = panel[c].isna() & panel[f"{c}_cand"].notna()
+                            if bool(fill_mask.any()):
+                                any_filled = True
+                            panel.loc[fill_mask, c] = panel.loc[fill_mask, f"{c}_cand"]
+                        if any_filled:
+                            panel.loc[panel["rank"].isna(), "rank"] = rank
+                            panel.loc[panel["id_type"].isna(), "id_type"] = cand_type
+                            panel.loc[panel["pull_id"].isna(), "pull_id"] = cand_id
+                        panel = panel.drop(columns=[f"{c}_cand" for c in self.output_cols], errors="ignore")
 
-                    total_bad_id_skips += skipped_bad
                     panel["firm_id"] = str(firm_id)
-                    panel = panel[["firm_id", "date", self.cfg.output_col, "rank", "id_type", "pull_id"]]
+                    panel = panel[["firm_id", "date", *self.output_cols, "rank", "id_type", "pull_id"]]
 
-                    resolved = int(panel[self.cfg.output_col].notna().sum())
-                    unresolved = int(panel[self.cfg.output_col].isna().sum())
+                    resolved = int(panel[self.primary_col].notna().sum())
+                    unresolved = int(panel[self.primary_col].isna().sum())
                     total_resolved += resolved
                     total_unresolved += unresolved
 
                     if unresolved > 0:
-                        miss = panel[panel[self.cfg.output_col].isna()][["firm_id", "date"]].copy()
+                        miss = panel[panel[self.primary_col].isna()][["firm_id", "date"]].copy()
                         miss["reason"] = "no_data_after_fallback"
                         miss["n_candidates"] = len(cands)
+                        miss["tried_ids"] = "|".join(dict.fromkeys(attempted_ids))
                         bad_rows.extend(miss.to_dict("records"))
 
                     batch_new_rows.extend(panel.to_dict("records"))
                     batch_processed.append(str(firm_id))
 
-                    resolved_dates = pd.to_datetime(panel.loc[panel[self.cfg.output_col].notna(), "date"], errors="coerce").dropna()
+                    resolved_dates = pd.to_datetime(panel.loc[panel[self.primary_col].notna(), "date"], errors="coerce").dropna()
                     pulled_range = "NA:NA" if resolved_dates.empty else f"{resolved_dates.min().date()}:{resolved_dates.max().date()}"
                     range_in_index = f"{start.date()}:{end.date()}"
                     tried_preview = " | ".join(dict.fromkeys(attempted_ids)) if attempted_ids else "NA"
                     print(
                         f"[BATCH {b_ix}/{n_batches}] [{b_start+k}/{len(companies)}] "
-                        f"firm_id={firm_id} | cand_used={cand_used}/{len(cands)} | bad_id_skip={skipped_bad} | "
-                        f"unresolved={unresolved} | found_{self.cfg.output_col}={resolved} | "
+                        f"firm_id={firm_id} | cand_used={cand_used}/{len(cands)} | bad_id_skip=0 | "
+                        f"unresolved={unresolved} | found_{self.primary_col}={resolved} | "
                         f"range_in_index={range_in_index} | pulled_range={pulled_range} | tried_ids: {tried_preview}"
                     )
 
                 if batch_new_rows:
-                    batch_df = normalize_step_rows(pd.DataFrame(batch_new_rows), self.cfg.output_col)
-                    prev = (
-                        normalize_step_rows(pd.read_parquet(self.step_rows_path), self.cfg.output_col)
-                        if self.step_rows_path.exists()
-                        else pd.DataFrame(columns=batch_df.columns)
-                    )
-                    combined = (
-                        pd.concat([prev, batch_df], ignore_index=True)
-                        .sort_values(["firm_id", "date"])
-                        .drop_duplicates(["firm_id", "date"], keep="last")
-                    )
+                    batch_df = self._normalize_step_rows_frame(pd.DataFrame(batch_new_rows))
+                    prev = self._normalize_step_rows_frame(pd.read_parquet(self.step_rows_path)) if self.step_rows_path.exists() else pd.DataFrame(columns=batch_df.columns)
+                    combined = pd.concat([prev, batch_df], ignore_index=True).sort_values(["firm_id", "date"]).drop_duplicates(["firm_id", "date"], keep="last")
                     combined.to_parquet(self.step_rows_path, index=False)
                     new_rows_out = combined.to_dict("records")
 
@@ -493,7 +577,6 @@ class StandardSeriesPuller:
                         "rows": int(len(new_rows_out)),
                     }
                     self.checkpoint_path.write_text(json.dumps(ckpt_payload, ensure_ascii=False, indent=2))
-                    save_bad_ids(self.bad_ids_path, bad_ids)
 
                 if self.cfg.batch_pause_sec > 0 and b_ix < n_batches:
                     time.sleep(self.cfg.batch_pause_sec)
@@ -515,10 +598,27 @@ class StandardSeriesPuller:
             out = out.drop_duplicates(subset=["firm_id", "date", "reason"], keep="last")
             out.to_csv(self.bad_rows_log_path, index=False)
 
+        bad_id_rows = []
+        if bad_rows:
+            bad_rows_df = pd.DataFrame(bad_rows)
+            for fid, grp in bad_rows_df.groupby("firm_id"):
+                tried = grp["tried_ids"].dropna().astype(str).iloc[0] if ("tried_ids" in grp.columns and grp["tried_ids"].notna().any()) else pd.NA
+                bad_id_rows.append(
+                    {
+                        "firm_id": str(fid),
+                        "last_failed_at": pd.Timestamp.utcnow().normalize(),
+                        "reason": "no_data_all_candidates",
+                        "n_candidates": int(pd.to_numeric(grp.get("n_candidates"), errors="coerce").max()) if "n_candidates" in grp.columns else pd.NA,
+                        "tried_ids": tried,
+                    }
+                )
+        bad_hist_after = append_bad_ids_rows(self.bad_ids_path, bad_id_rows)
+        total_bad_ids_added = len(set(r["firm_id"] for r in bad_id_rows) - bad_before_set) if bad_id_rows else 0
+
         print(
             f"Done: companies_total={companies_total}, run_remaining_start={len(companies)}, candidate_calls={total_cand_calls}, "
-            f"resolved_rows={total_resolved}, unresolved_rows={total_unresolved}, found_{self.cfg.output_col}={total_resolved}, "
-            f"bad_id_skip={total_bad_id_skips}, bad_ids_added={total_bad_ids_added}, known_bad_ids_now={len(bad_ids)}"
+            f"resolved_rows={total_resolved}, unresolved_rows={total_unresolved}, found_{self.primary_col}={total_resolved}, "
+            f"bad_id_skip={total_bad_id_skips}, bad_ids_added={total_bad_ids_added}, known_bad_ids_now={len(bad_hist_after)}"
         )
 
         return {
@@ -529,18 +629,23 @@ class StandardSeriesPuller:
             "unresolved_rows": total_unresolved,
             "bad_id_skip": total_bad_id_skips,
             "bad_ids_added": total_bad_ids_added,
-            "known_bad_ids_now": len(bad_ids),
+            "known_bad_ids_now": int(len(bad_hist_after)),
         }
 
 
-def build_ltg_request_rows(source_df: pd.DataFrame, output_col: str = "LTG") -> pd.DataFrame:
-    req_cols = [c for c in ["firm_id", "date", "ISIN", "RIC_current", "RIC", "id_type", "pull_id", output_col] if c in source_df.columns]
+def build_request_rows(source_df: pd.DataFrame, value_cols: list[str] | None = None) -> pd.DataFrame:
+    value_cols = value_cols or []
+    req_cols = [c for c in ["firm_id", "date", "ISIN", "RIC_current", "RIC", "id_type", "pull_id", *value_cols] if c in source_df.columns]
     if "firm_id" not in req_cols or "date" not in req_cols:
         raise ValueError("source_df must contain at least firm_id and date.")
     req = source_df[req_cols].copy()
     req["date"] = pd.to_datetime(req["date"], errors="coerce").dt.normalize()
     req = req.dropna(subset=["firm_id", "date"]).drop_duplicates(["firm_id", "date"], keep="last")
     return req.reset_index(drop=True)
+
+
+def build_ltg_request_rows(source_df: pd.DataFrame, output_col: str = "LTG") -> pd.DataFrame:
+    return build_request_rows(source_df=source_df, value_cols=[output_col])
 
 
 def to_quarter_end_dates(dates: Iterable[pd.Timestamp | str]) -> pd.Series:
@@ -558,6 +663,7 @@ class DailyReturnsPullConfig:
     coverage_tol_days: int = 5
     checkpoint_every_n_pulls: int = 25
     skip_known_bad_ids: bool = True
+    bad_id_cooldown_days: int = 30
     pull_abort_on_rate_limit: bool = True
     debug_firm_ids: set[str] | None = None
 
@@ -797,7 +903,12 @@ def run_daily_returns_standard_puller(
     cpm = cpm.dropna(subset=["firm_id", "start_date", "end_date"]).copy()
 
     initial_cache_files = {f.name for f in cache_dir.glob("*.parquet")}
-    bad_known = load_bad_ids(bad_ids_path) if (cfg.skip_known_bad_ids and not cfg.force_refresh) else set()
+    bad_hist_before = _load_bad_ids_table(bad_ids_path)
+    bad_known_firms = (
+        load_bad_firm_ids(bad_ids_path, cooldown_days=cfg.bad_id_cooldown_days)
+        if (cfg.skip_known_bad_ids and not cfg.force_refresh)
+        else set()
+    )
     step_rows: list[dict] = []
     manifest_rows: list[dict] = []
     bad_rows: list[dict] = []
@@ -807,9 +918,11 @@ def run_daily_returns_standard_puller(
         ld.open_session()
     try:
         pull_rows = cpm.copy()
+        skipped_known_bad = pull_rows[pull_rows["firm_id"].astype("string").isin(bad_known_firms)].copy()
+        pull_rows = pull_rows[~pull_rows["firm_id"].astype("string").isin(bad_known_firms)].copy()
         total = len(pull_rows)
         print(f"- total: {total} | cache_files: {len(initial_cache_files)}")
-        print(f"- known_bad_ids: {len(bad_known)}")
+        print(f"- known_bad_ids: {len(bad_hist_before)} | skipped_known_bad: {len(skipped_known_bad)}")
 
         for pull_idx, (_, row) in enumerate(pull_rows.iterrows(), start=1):
             firm_id = str(row["firm_id"])
@@ -833,11 +946,7 @@ def run_daily_returns_standard_puller(
                 cand_id = str(cand_id).strip()
                 if not cand_type or not cand_id:
                     continue
-                bad_key = f"{cand_type}:{cand_id}"
-                if bad_key in bad_known:
-                    bad_skip += 1
-                    continue
-                attempted_ids.append(bad_key)
+                attempted_ids.append(f"{cand_type}:{cand_id}")
                 seed = legacy_by_id.get((cand_type, cand_id))
                 try:
                     data, f_used, m_used = _dr_update_company_cache(
@@ -855,8 +964,6 @@ def run_daily_returns_standard_puller(
                         hit_rate_limit = True
                         if cfg.pull_abort_on_rate_limit:
                             break
-                    if _dr_is_unable_to_resolve_error(e):
-                        bad_known.add(bad_key)
                     continue
 
                 if not data.empty:
@@ -935,7 +1042,6 @@ def run_daily_returns_standard_puller(
                 step_ckpt_path.write_text(
                     json.dumps({"processed_count": pull_idx, "updated_at_utc": pd.Timestamp.utcnow().isoformat()}, ensure_ascii=False, indent=2)
                 )
-                save_bad_ids(bad_ids_path, bad_known)
     finally:
         if not cfg.skip_lseg_pull:
             try:
@@ -963,12 +1069,12 @@ def run_daily_returns_standard_puller(
     step_ckpt_path.write_text(
         json.dumps({"processed_count": len(step_rows), "updated_at_utc": pd.Timestamp.utcnow().isoformat()}, ensure_ascii=False, indent=2)
     )
-    save_bad_ids(bad_ids_path, bad_known)
+    bad_hist_after = append_bad_ids_rows(bad_ids_path, bad_rows)
 
     print("Saved manifest:", manifest_path)
     print("Saved company returns:", output_returns_all, "rows:", len(returns_all))
     print("Built missing list in-memory rows:", len(missing_df))
-    print("Updated bad-id log:", bad_ids_path, "rows:", len(bad_known))
+    print("Updated bad-id log:", bad_ids_path, "rows:", len(bad_hist_after))
     print("Saved step rows:", step_rows_path, "rows:", len(step_rows))
     print("Saved step checkpoint:", step_ckpt_path)
     post_cache_files = {f.name for f in cache_dir.glob("*.parquet")}
@@ -978,5 +1084,5 @@ def run_daily_returns_standard_puller(
         "manifest_rows": int(len(manifest_df)),
         "returns_rows": int(len(returns_all)),
         "missing_rows": int(len(missing_df)),
-        "known_bad_ids": int(len(bad_known)),
+        "known_bad_ids": int(len(bad_hist_after)),
     }

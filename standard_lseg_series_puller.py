@@ -618,8 +618,9 @@ class StandardSeriesPuller:
                     total_unresolved += unresolved
 
                     if unresolved > 0:
+                        reason = "no_data_all_candidates" if resolved == 0 else "partial_missing_after_fallback"
                         miss = panel[panel[self.primary_col].isna()][["firm_id", "date"]].copy()
-                        miss["reason"] = "no_data_after_fallback"
+                        miss["reason"] = reason
                         miss["n_candidates"] = len(cands)
                         miss["tried_ids"] = "|".join(dict.fromkeys(attempted_ids))
                         miss_rows = miss.to_dict("records")
@@ -649,7 +650,10 @@ class StandardSeriesPuller:
                     elif len(frames) == 1:
                         combined = frames[0].copy()
                     else:
-                        combined = pd.concat(frames, ignore_index=True)
+                        combined = pd.DataFrame.from_records(
+                            frames[0].to_dict("records") + frames[1].to_dict("records"),
+                            columns=frames[0].columns,
+                        )
                     combined = combined.sort_values(["firm_id", "date"]).drop_duplicates(["firm_id", "date"], keep="last")
                     combined.to_parquet(self.step_rows_path, index=False)
                     new_rows_out = combined.to_dict("records")
@@ -667,6 +671,10 @@ class StandardSeriesPuller:
                 # Persist bad_ids incrementally per batch so progress survives interruptions.
                 if batch_bad_rows:
                     batch_bad_df = pd.DataFrame(batch_bad_rows)
+                    if "reason" in batch_bad_df.columns:
+                        batch_bad_df = batch_bad_df[batch_bad_df["reason"] == "no_data_all_candidates"].copy()
+                    else:
+                        batch_bad_df = pd.DataFrame(columns=batch_bad_df.columns)
                     batch_bad_id_rows = []
                     for fid, grp in batch_bad_df.groupby("firm_id"):
                         tried = grp["tried_ids"].dropna().astype(str).iloc[0] if ("tried_ids" in grp.columns and grp["tried_ids"].notna().any()) else pd.NA
@@ -679,7 +687,8 @@ class StandardSeriesPuller:
                                 "tried_ids": tried,
                             }
                         )
-                    bad_hist_batch = append_bad_ids_rows(self.bad_ids_path, batch_bad_id_rows)
+                    if batch_bad_id_rows:
+                        bad_hist_batch = append_bad_ids_rows(self.bad_ids_path, batch_bad_id_rows)
 
                 if self.cfg.batch_pause_sec > 0 and b_ix < n_batches:
                     time.sleep(self.cfg.batch_pause_sec)
@@ -704,6 +713,10 @@ class StandardSeriesPuller:
         bad_id_rows = []
         if bad_rows:
             bad_rows_df = pd.DataFrame(bad_rows)
+            if "reason" in bad_rows_df.columns:
+                bad_rows_df = bad_rows_df[bad_rows_df["reason"] == "no_data_all_candidates"].copy()
+            else:
+                bad_rows_df = pd.DataFrame(columns=bad_rows_df.columns)
             for fid, grp in bad_rows_df.groupby("firm_id"):
                 tried = grp["tried_ids"].dropna().astype(str).iloc[0] if ("tried_ids" in grp.columns and grp["tried_ids"].notna().any()) else pd.NA
                 bad_id_rows.append(

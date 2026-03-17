@@ -33,6 +33,9 @@ class SeriesPullConfig:
     series_specs: tuple["SeriesFieldSpec", ...] | None = None
     primary_output_col: str | None = None
     candidate_order: tuple[str, ...] = ("ISIN", "RIC_current", "RIC", "history")
+    # Optional per-firm candidate overrides. Entries are prepended to auto-built candidates.
+    # Example: {"FIRM0000602": [("RIC", "NAFGn.DE"), ("RIC", "NAFG.DE")]}
+    candidate_overrides: dict[str, list[tuple[str, str]]] | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,11 @@ def _safe_name(text: str) -> str:
 
 def _ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _is_rate_limit_message(msg: str) -> bool:
+    m = str(msg).lower()
+    return ("too many requests" in m) or ("rate limit" in m) or ("http 429" in m) or ("status 429" in m)
 
 
 BAD_IDS_COLUMNS = ["firm_id", "last_failed_at", "reason", "n_candidates", "tried_ids"]
@@ -169,6 +177,37 @@ def build_company_candidates(company_req: pd.DataFrame, candidate_order: tuple[s
             elif it == "RIC":
                 _add("RIC", pid)
 
+    return out
+
+
+def apply_candidate_overrides(
+    candidates: list[tuple[str, str]],
+    overrides: list[tuple[str, str]] | None,
+) -> list[tuple[str, str]]:
+    if not overrides:
+        return candidates
+    out: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(id_type: object, value: object) -> None:
+        if pd.isna(id_type) or pd.isna(value):
+            return
+        it = str(id_type).strip().upper()
+        v = str(value).strip()
+        if not it or not v:
+            return
+        if it == "ISIN" and v.upper().startswith("ISIN:"):
+            v = v.split(":", 1)[1].strip()
+        key = (it, v)
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(key)
+
+    for it, v in overrides:
+        _add(it, v)
+    for it, v in candidates:
+        _add(it, v)
     return out
 
 
@@ -419,6 +458,13 @@ class StandardSeriesPuller:
                         except Exception as e:
                             last_err = e
                             msg = str(e)
+                            is_rl = _is_rate_limit_message(msg)
+                            if is_rl and (r + 1 == self.cfg.max_retries):
+                                fld = ",".join([str(f) for f in field_list])
+                                print(
+                                    f"[RATE_LIMIT] exhausted retries for id={universe_id} "
+                                    f"field={fld} interval={interval} retries={self.cfg.max_retries}"
+                                )
                             if "Unable to resolve all requested identifiers" in msg:
                                 saw_unresolvable = True
                                 unresolved_for_this_id = True
@@ -478,6 +524,12 @@ class StandardSeriesPuller:
             str(fid): build_company_candidates(g, candidate_order=self.cfg.candidate_order)
             for fid, g in req.groupby("firm_id", sort=False)
         }
+        if self.cfg.candidate_overrides:
+            for fid, cand in list(company_candidates_map.items()):
+                company_candidates_map[fid] = apply_candidate_overrides(
+                    cand,
+                    self.cfg.candidate_overrides.get(fid),
+                )
         companies_all = req["firm_id"].dropna().astype(str).unique().tolist()
         companies_total = len(companies_all)
 

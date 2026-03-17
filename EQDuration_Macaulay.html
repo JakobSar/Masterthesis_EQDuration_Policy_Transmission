@@ -7802,12 +7802,7 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h1 id="Macaulay-Equity-Duration-(FY1-FY3-+-Transition-+-Terminal)">Macaulay Equity Duration (FY1-FY3 + Transition + Terminal)<a class="anchor-link" href="#Macaulay-Equity-Duration-(FY1-FY3-+-Transition-+-Terminal)">¶</a></h1><p>This notebook computes firm-level Macaulay equity duration from analyst EPS forecasts:</p>
-<ul>
-<li>Explicit phase: FY1-FY3</li>
-<li>Transition phase: years 4-10 with linearly fading growth</li>
-<li>Terminal phase: perpetual growth with (g_\infty = 2%)</li>
-</ul>
+<h1 id="Macaulay-Equity-Duration-(Price-Implied-Terminal-Value)">Macaulay Equity Duration (Price-Implied Terminal Value)<a class="anchor-link" href="#Macaulay-Equity-Duration-(Price-Implied-Terminal-Value)">¶</a></h1>
 </div>
 </div>
 </div>
@@ -7827,7 +7822,7 @@ a.anchor-link {
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [1]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [12]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
@@ -7837,17 +7832,22 @@ a.anchor-link {
 <span class="n">pd</span><span class="o">.</span><span class="n">set_option</span><span class="p">(</span><span class="s1">'display.max_columns'</span><span class="p">,</span> <span class="mi">200</span><span class="p">)</span>
 <span class="n">pd</span><span class="o">.</span><span class="n">set_option</span><span class="p">(</span><span class="s1">'display.width'</span><span class="p">,</span> <span class="mi">180</span><span class="p">)</span>
 
-<span class="c1"># Project-style storage layout (consistent with other notebooks)</span>
-<span class="n">BASE_DIR</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="s1">'/Users/jakob/Documents/Parforceleistung/Studium/MSc Economics/Masterarbeit/Project_Data'</span><span class="p">)</span>
-<span class="n">DATA_DIR</span> <span class="o">=</span> <span class="n">BASE_DIR</span> <span class="o">/</span> <span class="s1">'intermediate'</span>
+<span class="c1"># Prefer local dataset filename; fallback to existing Project_Data layout</span>
+<span class="n">input_candidates</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="n">Path</span><span class="p">(</span><span class="s1">'euro500_macaulay.parquet'</span><span class="p">),</span>
+    <span class="n">Path</span><span class="p">(</span><span class="s1">'/Users/jakob/Documents/Parforceleistung/Studium/MSc Economics/Masterarbeit/Project_Data/intermediate/euro500_macaulay.parquet'</span><span class="p">),</span>
+<span class="p">]</span>
+<span class="n">INPUT_PATH</span> <span class="o">=</span> <span class="nb">next</span><span class="p">((</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">input_candidates</span> <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">exists</span><span class="p">()),</span> <span class="kc">None</span><span class="p">)</span>
+<span class="k">if</span> <span class="n">INPUT_PATH</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="s1">'Could not find euro500_macaulay.parquet in expected locations.'</span><span class="p">)</span>
 
-<span class="n">INPUT_PATH</span> <span class="o">=</span> <span class="n">DATA_DIR</span> <span class="o">/</span> <span class="s1">'euro500_macaulay.parquet'</span>
+<span class="n">DATA_DIR</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="s1">'/Users/jakob/Documents/Parforceleistung/Studium/MSc Economics/Masterarbeit/Project_Data/intermediate'</span><span class="p">)</span>
 <span class="n">OUTPUT_PATH</span> <span class="o">=</span> <span class="n">DATA_DIR</span> <span class="o">/</span> <span class="s1">'EQDuration_Macaulay.parquet'</span>
 
 <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">INPUT_PATH</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'Loaded rows: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">:</span><span class="s1">,</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'Loaded columns: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">)</span><span class="si">:</span><span class="s1">,</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'Input file: </span><span class="si">{</span><span class="n">INPUT_PATH</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'Input file: </span><span class="si">{</span><span class="n">INPUT_PATH</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -7873,23 +7873,25 @@ Input file: /Users/jakob/Documents/Parforceleistung/Studium/MSc Economics/Master
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [2]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [13]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="c1"># Required non-missing fields for this model</span>
+<div class="highlight hl-ipython3"><pre><span></span><span class="c1"># Required fields for this model</span>
 <span class="n">required_cols</span> <span class="o">=</span> <span class="p">[</span>
     <span class="s1">'PriceClose'</span><span class="p">,</span>
     <span class="s1">'EPS_FY1'</span><span class="p">,</span>
     <span class="s1">'EPS_FY2'</span><span class="p">,</span>
     <span class="s1">'EPS_FY3'</span><span class="p">,</span>
-    <span class="s1">'market_risk_free_rate_annual'</span><span class="p">,</span>
 <span class="p">]</span>
 
-<span class="c1"># Step 10 cleaning rule (applied before valuation): remove negative EPS_FY1 and PriceClose</span>
+<span class="c1"># Required data cleaning</span>
+<span class="c1"># - drop missing PriceClose / EPS_FY1 / EPS_FY2 / EPS_FY3</span>
+<span class="c1"># - drop PriceClose &lt;= 0 and EPS_FY1 &lt;= 0</span>
+<span class="c1"># - do NOT drop based on EPS_FY4 / EPS_FY5 missingness</span>
 <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">dropna</span><span class="p">(</span><span class="n">subset</span><span class="o">=</span><span class="n">required_cols</span><span class="p">)</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
-<span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="p">[(</span><span class="n">df</span><span class="p">[</span><span class="s1">'EPS_FY1'</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'PriceClose'</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+<span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="p">[(</span><span class="n">df</span><span class="p">[</span><span class="s1">'PriceClose'</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'EPS_FY1'</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
 
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'Rows after required-field + sign filters: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">:</span><span class="s1">,</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'Rows after required cleaning: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">:</span><span class="s1">,</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -7902,7 +7904,7 @@ Input file: /Users/jakob/Documents/Parforceleistung/Studium/MSc Economics/Master
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>Rows after required-field + sign filters: 21,896
+<pre>Rows after required cleaning: 21,893
 </pre>
 </div>
 </div>
@@ -7915,10 +7917,7 @@ Input file: /Users/jakob/Documents/Parforceleistung/Studium/MSc Economics/Master
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="2)-Discount-rate">2) Discount rate<a class="anchor-link" href="#2)-Discount-rate">¶</a></h2><p>Use a constant equity risk premium of 5%:
-$$
-r = rf + 0.05
-$$</p>
+<h2 id="2)-Discount-rate">2) Discount rate<a class="anchor-link" href="#2)-Discount-rate">¶</a></h2>
 </div>
 </div>
 </div>
@@ -7927,20 +7926,15 @@ $$</p>
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [3]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [14]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="n">ERP</span> <span class="o">=</span> <span class="mf">0.05</span>
+<div class="highlight hl-ipython3"><pre><span></span><span class="c1"># Stable constant discount rate</span>
+<span class="n">R</span> <span class="o">=</span> <span class="mf">0.10</span>
 <span class="n">G_INF</span> <span class="o">=</span> <span class="mf">0.02</span>
 
-<span class="c1"># Convert risk-free rate to numeric and construct discount rate</span>
-<span class="c1"># Assumption: market_risk_free_rate_annual is already in decimal terms.</span>
-<span class="n">df</span><span class="p">[</span><span class="s1">'rf'</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'market_risk_free_rate_annual'</span><span class="p">],</span> <span class="n">errors</span><span class="o">=</span><span class="s1">'coerce'</span><span class="p">)</span>
-<span class="n">df</span><span class="p">[</span><span class="s1">'r'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'rf'</span><span class="p">]</span> <span class="o">+</span> <span class="n">ERP</span>
-
-<span class="c1"># Keep only economically valid rows for terminal value denominator (r - g_inf &gt; 0)</span>
-<span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s1">'r'</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">G_INF</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'Rows after requiring r &gt; g_inf: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">:</span><span class="s1">,</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
+<span class="n">df</span><span class="p">[</span><span class="s1">'r'</span><span class="p">]</span> <span class="o">=</span> <span class="n">R</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'Using constant discount rate r = </span><span class="si">{</span><span class="n">R</span><span class="si">:</span><span class="s1">.2%</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -7953,7 +7947,7 @@ $$</p>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>Rows after requiring r &gt; g_inf: 21,896
+<pre>Using constant discount rate r = 10.00%
 </pre>
 </div>
 </div>
@@ -7966,10 +7960,7 @@ $$</p>
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="3)-LTG-preparation">3) LTG preparation<a class="anchor-link" href="#3)-LTG-preparation">¶</a></h2><p>LTG is provided in percent. Convert to decimal and clip:
-$$
-g_0 = \mathrm{clip}(LTG/100, -0.02, 0.15)
-$$</p>
+<h2 id="3)-LTG-preparation">3) LTG preparation<a class="anchor-link" href="#3)-LTG-preparation">¶</a></h2>
 </div>
 </div>
 </div>
@@ -7978,11 +7969,16 @@ $$</p>
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [4]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [15]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="n">df</span><span class="p">[</span><span class="s1">'LTG_decimal'</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'LTG'</span><span class="p">],</span> <span class="n">errors</span><span class="o">=</span><span class="s1">'coerce'</span><span class="p">)</span> <span class="o">/</span> <span class="mf">100.0</span>
+<div class="highlight hl-ipython3"><pre><span></span><span class="c1"># LTG is used only as medium-run transition signal</span>
+<span class="c1"># Convert percent to decimal and clip to economically plausible range</span>
+<span class="n">df</span><span class="p">[</span><span class="s1">'LTG_decimal'</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'LTG'</span><span class="p">],</span> <span class="n">errors</span><span class="o">=</span><span class="s1">'coerce'</span><span class="p">)</span> <span class="o">/</span> <span class="mf">100.0</span>
 <span class="n">df</span><span class="p">[</span><span class="s1">'g0'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'LTG_decimal'</span><span class="p">]</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">lower</span><span class="o">=-</span><span class="mf">0.02</span><span class="p">,</span> <span class="n">upper</span><span class="o">=</span><span class="mf">0.15</span><span class="p">)</span>
+
+<span class="c1"># Neutral fallback when LTG is missing: start transition at long-run growth</span>
+<span class="n">df</span><span class="p">[</span><span class="s1">'g0'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'g0'</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="n">G_INF</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -8004,7 +8000,7 @@ $$</p>
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [5]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [16]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="n">df</span><span class="p">[</span><span class="s1">'C1'</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'EPS_FY1'</span><span class="p">],</span> <span class="n">errors</span><span class="o">=</span><span class="s1">'coerce'</span><span class="p">)</span>
@@ -8022,14 +8018,7 @@ $$</p>
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="5)-Transition-growth-path-(years-4-10)">5) Transition growth path (years 4-10)<a class="anchor-link" href="#5)-Transition-growth-path-(years-4-10)">¶</a></h2><p>Growth fades linearly from $g_0$ in year 4 to $g_\infty=2\%$ in year 10:
-$$
-g_t = g_0 + \frac{t-4}{10-4}(g_\infty - g_0),\quad t=4,\ldots,10
-$$
-Then recursively:
-$$
-C_t = C_{t-1}(1+g_t)
-$$</p>
+<h2 id="5)-Transition-growth-path-(years-4-10)">5) Transition growth path (years 4-10)<a class="anchor-link" href="#5)-Transition-growth-path-(years-4-10)">¶</a></h2>
 </div>
 </div>
 </div>
@@ -8038,13 +8027,14 @@ $$</p>
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [6]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [17]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="c1"># Build year-specific growth rates and recursive cashflows</span>
+<div class="highlight hl-ipython3"><pre><span></span><span class="c1"># Growth fades linearly from g0 in year 4 to g_inf in year 10</span>
 <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="mi">11</span><span class="p">):</span>
-    <span class="n">df</span><span class="p">[</span><span class="sa">f</span><span class="s1">'g_</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s1">'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'g0'</span><span class="p">]</span> <span class="o">+</span> <span class="p">((</span><span class="n">t</span> <span class="o">-</span> <span class="mi">4</span><span class="p">)</span> <span class="o">/</span> <span class="mf">6.0</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">G_INF</span> <span class="o">-</span> <span class="n">df</span><span class="p">[</span><span class="s1">'g0'</span><span class="p">])</span>
+    <span class="n">df</span><span class="p">[</span><span class="sa">f</span><span class="s1">'g_</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s1">'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'g0'</span><span class="p">]</span> <span class="o">+</span> <span class="p">((</span><span class="n">t</span> <span class="o">-</span> <span class="mi">4</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="mi">10</span> <span class="o">-</span> <span class="mi">4</span><span class="p">))</span> <span class="o">*</span> <span class="p">(</span><span class="n">G_INF</span> <span class="o">-</span> <span class="n">df</span><span class="p">[</span><span class="s1">'g0'</span><span class="p">])</span>
 
+<span class="c1"># Recursive transition cashflow construction</span>
 <span class="n">df</span><span class="p">[</span><span class="s1">'C4'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'C3'</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">+</span> <span class="n">df</span><span class="p">[</span><span class="s1">'g_4'</span><span class="p">])</span>
 <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">11</span><span class="p">):</span>
     <span class="n">df</span><span class="p">[</span><span class="sa">f</span><span class="s1">'C</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s1">'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="sa">f</span><span class="s1">'C</span><span class="si">{</span><span class="n">t</span><span class="o">-</span><span class="mi">1</span><span class="si">}</span><span class="s1">'</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">+</span> <span class="n">df</span><span class="p">[</span><span class="sa">f</span><span class="s1">'g_</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s1">'</span><span class="p">])</span>
@@ -8060,9 +8050,7 @@ $$</p>
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="6)-Terminal-value">6) Terminal value<a class="anchor-link" href="#6)-Terminal-value">¶</a></h2><p>$$
-C_{11} = C_{10}(1+g_\infty),\quad TV_{10}=\frac{C_{11}}{r-g_\infty}
-$$</p>
+<h2 id="6)-Price-Implied-Terminal-Block-(No-Gordon-TV)">6) Price-Implied Terminal Block (No Gordon TV)<a class="anchor-link" href="#6)-Price-Implied-Terminal-Block-(No-Gordon-TV)">¶</a></h2>
 </div>
 </div>
 </div>
@@ -8071,11 +8059,21 @@ $$</p>
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [7]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [18]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="n">df</span><span class="p">[</span><span class="s1">'C11'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'C10'</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">+</span> <span class="n">G_INF</span><span class="p">)</span>
-<span class="n">df</span><span class="p">[</span><span class="s1">'TV10'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'C11'</span><span class="p">]</span> <span class="o">/</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'r'</span><span class="p">]</span> <span class="o">-</span> <span class="n">G_INF</span><span class="p">)</span>
+<div class="highlight hl-ipython3"><pre><span></span><span class="c1"># Present value of explicit cashflows only (t=1..10)</span>
+<span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">11</span><span class="p">):</span>
+    <span class="n">df</span><span class="p">[</span><span class="sa">f</span><span class="s1">'PV_</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s1">'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="sa">f</span><span class="s1">'C</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s1">'</span><span class="p">]</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">power</span><span class="p">(</span><span class="mf">1.0</span> <span class="o">+</span> <span class="n">df</span><span class="p">[</span><span class="s1">'r'</span><span class="p">],</span> <span class="n">t</span><span class="p">)</span>
+
+<span class="n">pv_cols</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s1">'PV_</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s1">'</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">11</span><span class="p">)]</span>
+<span class="n">df</span><span class="p">[</span><span class="s1">'PV_explicit'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">pv_cols</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+<span class="c1"># Terminal block is residual present value implied by observed price</span>
+<span class="n">df</span><span class="p">[</span><span class="s1">'PV_terminal'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'PriceClose'</span><span class="p">]</span> <span class="o">-</span> <span class="n">df</span><span class="p">[</span><span class="s1">'PV_explicit'</span><span class="p">]</span>
+
+<span class="c1"># By construction anchor total valuation to observed stock price</span>
+<span class="n">df</span><span class="p">[</span><span class="s1">'PV_total'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'PriceClose'</span><span class="p">]</span>
 </pre></div>
 </div>
 </div>
@@ -8088,7 +8086,7 @@ $$</p>
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="7)-Present-value-of-cashflows">7) Present value of cashflows<a class="anchor-link" href="#7)-Present-value-of-cashflows">¶</a></h2>
+<h2 id="7)-Macaulay-Duration-with-Price-Anchor">7) Macaulay Duration with Price Anchor<a class="anchor-link" href="#7)-Macaulay-Duration-with-Price-Anchor">¶</a></h2>
 </div>
 </div>
 </div>
@@ -8097,17 +8095,22 @@ $$</p>
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [8]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [19]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="c1"># Discount factors and PVs for years 1..10</span>
+<div class="highlight hl-ipython3"><pre><span></span><span class="c1"># Terminal maturity of level perpetuity beginning in year 10</span>
+<span class="c1"># T_terminal = 10 + (1 + r) / r = 21 when r=10%</span>
+<span class="n">df</span><span class="p">[</span><span class="s1">'T_terminal'</span><span class="p">]</span> <span class="o">=</span> <span class="mf">10.0</span> <span class="o">+</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">+</span> <span class="n">df</span><span class="p">[</span><span class="s1">'r'</span><span class="p">])</span> <span class="o">/</span> <span class="n">df</span><span class="p">[</span><span class="s1">'r'</span><span class="p">]</span>
+
+<span class="c1"># Duration numerator: explicit block + price-implied terminal block</span>
+<span class="n">duration_num</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
 <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">11</span><span class="p">):</span>
-    <span class="n">df</span><span class="p">[</span><span class="sa">f</span><span class="s1">'PV_</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s1">'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="sa">f</span><span class="s1">'C</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s1">'</span><span class="p">]</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">power</span><span class="p">(</span><span class="mf">1.0</span> <span class="o">+</span> <span class="n">df</span><span class="p">[</span><span class="s1">'r'</span><span class="p">],</span> <span class="n">t</span><span class="p">)</span>
+    <span class="n">duration_num</span> <span class="o">+=</span> <span class="n">t</span> <span class="o">*</span> <span class="n">df</span><span class="p">[</span><span class="sa">f</span><span class="s1">'PV_</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s1">'</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span>
 
-<span class="n">df</span><span class="p">[</span><span class="s1">'PV_TV'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'TV10'</span><span class="p">]</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">power</span><span class="p">(</span><span class="mf">1.0</span> <span class="o">+</span> <span class="n">df</span><span class="p">[</span><span class="s1">'r'</span><span class="p">],</span> <span class="mi">10</span><span class="p">)</span>
+<span class="n">duration_num</span> <span class="o">+=</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'T_terminal'</span><span class="p">]</span> <span class="o">*</span> <span class="n">df</span><span class="p">[</span><span class="s1">'PV_terminal'</span><span class="p">])</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span>
+<span class="n">df</span><span class="p">[</span><span class="s1">'Duration_num'</span><span class="p">]</span> <span class="o">=</span> <span class="n">duration_num</span>
 
-<span class="n">pv_cols</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s1">'PV_</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s1">'</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">11</span><span class="p">)]</span>
-<span class="n">df</span><span class="p">[</span><span class="s1">'PV_total'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">pv_cols</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="n">df</span><span class="p">[</span><span class="s1">'PV_TV'</span><span class="p">]</span>
+<span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'Duration_num'</span><span class="p">]</span> <span class="o">/</span> <span class="n">df</span><span class="p">[</span><span class="s1">'PriceClose'</span><span class="p">]</span>
 </pre></div>
 </div>
 </div>
@@ -8120,40 +8123,48 @@ $$</p>
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="8)-Macaulay-duration">8) Macaulay duration<a class="anchor-link" href="#8)-Macaulay-duration">¶</a></h2><p>Numerator:
-$$
-\sum_{t=1}^{10} t\,PV_t + T_{TV}\,PV_{TV}
-$$
-with terminal maturity:
-$$
-T_{TV} = 10 + \frac{1+r}{r-g_\infty}
-$$</p>
-<p>Duration:
-$$
-D = \frac{	ext{Numerator}}{	ext{PriceClose}}
-$$</p>
+<h2 id="8)-Safeguards-and-Cleaning">8) Safeguards and Cleaning<a class="anchor-link" href="#8)-Safeguards-and-Cleaning">¶</a></h2>
 </div>
 </div>
 </div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=961d384f">
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=961d384f">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [9]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [20]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="c1"># Duration numerator for explicit years</span>
-<span class="n">duration_numerator</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
-<span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">11</span><span class="p">):</span>
-    <span class="n">duration_numerator</span> <span class="o">+=</span> <span class="n">t</span> <span class="o">*</span> <span class="n">df</span><span class="p">[</span><span class="sa">f</span><span class="s1">'PV_</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s1">'</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span>
+<div class="highlight hl-ipython3"><pre><span></span><span class="c1"># Requested diagnostics flags</span>
+<span class="n">df</span><span class="p">[</span><span class="s1">'flag_negative_terminal'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'PV_terminal'</span><span class="p">]</span> <span class="o">&lt;</span> <span class="mi">0</span>
+<span class="n">df</span><span class="p">[</span><span class="s1">'flag_small_price'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'PriceClose'</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">1</span>
+<span class="n">df</span><span class="p">[</span><span class="s1">'flag_bad_duration'</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay'</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay'</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">100</span><span class="p">)</span>
 
-<span class="c1"># Add terminal contribution</span>
-<span class="n">df</span><span class="p">[</span><span class="s1">'T_TV'</span><span class="p">]</span> <span class="o">=</span> <span class="mf">10.0</span> <span class="o">+</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">+</span> <span class="n">df</span><span class="p">[</span><span class="s1">'r'</span><span class="p">])</span> <span class="o">/</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'r'</span><span class="p">]</span> <span class="o">-</span> <span class="n">G_INF</span><span class="p">)</span>
-<span class="n">duration_numerator</span> <span class="o">+=</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'T_TV'</span><span class="p">]</span> <span class="o">*</span> <span class="n">df</span><span class="p">[</span><span class="s1">'PV_TV'</span><span class="p">])</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span>
+<span class="c1"># Clean duration version</span>
+<span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay_clean'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay'</span><span class="p">]</span>
+<span class="n">invalid_mask</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'flag_negative_terminal'</span><span class="p">]</span> <span class="o">|</span> <span class="n">df</span><span class="p">[</span><span class="s1">'flag_small_price'</span><span class="p">]</span> <span class="o">|</span> <span class="n">df</span><span class="p">[</span><span class="s1">'flag_bad_duration'</span><span class="p">]</span>
+<span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">invalid_mask</span><span class="p">,</span> <span class="s1">'duration_macaulay_clean'</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
 
-<span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay'</span><span class="p">]</span> <span class="o">=</span> <span class="n">duration_numerator</span> <span class="o">/</span> <span class="n">df</span><span class="p">[</span><span class="s1">'PriceClose'</span><span class="p">]</span>
+<span class="c1"># Winsorize cleaned duration at 1% and 99%</span>
+<span class="n">q01</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay_clean'</span><span class="p">]</span><span class="o">.</span><span class="n">quantile</span><span class="p">(</span><span class="mf">0.01</span><span class="p">)</span>
+<span class="n">q99</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay_clean'</span><span class="p">]</span><span class="o">.</span><span class="n">quantile</span><span class="p">(</span><span class="mf">0.99</span><span class="p">)</span>
+<span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay_clean'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay_clean'</span><span class="p">]</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">lower</span><span class="o">=</span><span class="n">q01</span><span class="p">,</span> <span class="n">upper</span><span class="o">=</span><span class="n">q99</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'Winsor bounds on cleaned duration: [</span><span class="si">{</span><span class="n">q01</span><span class="si">:</span><span class="s1">.6f</span><span class="si">}</span><span class="s1">, </span><span class="si">{</span><span class="n">q99</span><span class="si">:</span><span class="s1">.6f</span><span class="si">}</span><span class="s1">]'</span><span class="p">)</span>
 </pre></div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell-outputWrapper">
+<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
+</div>
+<div class="jp-OutputArea jp-Cell-outputArea">
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>Winsor bounds on cleaned duration: [5.213471, 18.055910]
+</pre>
 </div>
 </div>
 </div>
@@ -8174,25 +8185,58 @@ $$</p>
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [10]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [21]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="c1"># 1) Terminal value share</span>
-<span class="n">df</span><span class="p">[</span><span class="s1">'TV_share'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'PV_TV'</span><span class="p">]</span> <span class="o">/</span> <span class="n">df</span><span class="p">[</span><span class="s1">'PV_total'</span><span class="p">]</span>
+<div class="highlight hl-ipython3"><pre><span></span><span class="c1"># A) Raw duration summary</span>
+<span class="nb">print</span><span class="p">(</span><span class="s1">'A) duration_macaulay describe()'</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay'</span><span class="p">]</span><span class="o">.</span><span class="n">describe</span><span class="p">())</span>
+<span class="nb">print</span><span class="p">()</span>
 
-<span class="c1"># 2) Duration summary statistics</span>
-<span class="n">duration_summary</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay'</span><span class="p">]</span><span class="o">.</span><span class="n">describe</span><span class="p">()</span>
-<span class="nb">print</span><span class="p">(</span><span class="s1">'Duration summary:'</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">duration_summary</span><span class="p">)</span>
+<span class="c1"># B) Cleaned duration summary</span>
+<span class="nb">print</span><span class="p">(</span><span class="s1">'B) duration_macaulay_clean describe()'</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay_clean'</span><span class="p">]</span><span class="o">.</span><span class="n">describe</span><span class="p">())</span>
+<span class="nb">print</span><span class="p">()</span>
 
-<span class="c1"># 3) Cross-sectional std by date</span>
-<span class="n">cs_std_by_date</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s1">'date'</span><span class="p">,</span> <span class="n">dropna</span><span class="o">=</span><span class="kc">False</span><span class="p">)[</span><span class="s1">'duration_macaulay'</span><span class="p">]</span><span class="o">.</span><span class="n">std</span><span class="p">()</span>
-<span class="nb">print</span><span class="p">(</span><span class="s1">'Cross-sectional duration std (first 10 dates):'</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">cs_std_by_date</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="mi">10</span><span class="p">))</span>
+<span class="c1"># C) Share negative terminal residual</span>
+<span class="n">share_negative_terminal</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'flag_negative_terminal'</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'C) Share negative terminal residual: </span><span class="si">{</span><span class="n">share_negative_terminal</span><span class="si">:</span><span class="s1">.4%</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
 
-<span class="c1"># 4) Correlation with LTG (decimal LTG)</span>
-<span class="n">corr_duration_ltg</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay'</span><span class="p">]</span><span class="o">.</span><span class="n">corr</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'LTG_decimal'</span><span class="p">])</span>
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'Correlation duration vs LTG_decimal: </span><span class="si">{</span><span class="n">corr_duration_ltg</span><span class="si">:</span><span class="s1">.6f</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
+<span class="c1"># D) Share duration &gt; 100 before cleaning</span>
+<span class="n">share_duration_gt_100</span> <span class="o">=</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay'</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">100</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'D) Share duration &gt; 100 before cleaning: </span><span class="si">{</span><span class="n">share_duration_gt_100</span><span class="si">:</span><span class="s1">.4%</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
+
+<span class="c1"># E) Share retained after cleaning</span>
+<span class="n">share_retained</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay_clean'</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'E) Share retained after cleaning: </span><span class="si">{</span><span class="n">share_retained</span><span class="si">:</span><span class="s1">.4%</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># F) Cross-sectional std by quarter/date</span>
+<span class="k">if</span> <span class="s1">'date'</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+    <span class="n">cs_std_date</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s1">'date'</span><span class="p">,</span> <span class="n">dropna</span><span class="o">=</span><span class="kc">False</span><span class="p">)[</span><span class="s1">'duration_macaulay_clean'</span><span class="p">]</span><span class="o">.</span><span class="n">std</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">'F) Cross-sectional std by date (describe):'</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">cs_std_date</span><span class="o">.</span><span class="n">describe</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+<span class="k">if</span> <span class="s1">'quarter'</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+    <span class="n">cs_std_quarter</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s1">'quarter'</span><span class="p">,</span> <span class="n">dropna</span><span class="o">=</span><span class="kc">False</span><span class="p">)[</span><span class="s1">'duration_macaulay_clean'</span><span class="p">]</span><span class="o">.</span><span class="n">std</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">'F) Cross-sectional std by quarter (describe):'</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">cs_std_quarter</span><span class="o">.</span><span class="n">describe</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># G) Quintile median durations</span>
+<span class="n">valid</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay_clean'</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span>
+<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">valid</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">5</span><span class="p">:</span>
+    <span class="n">q_labels</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">]</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">valid</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="s1">'duration_quintile'</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">qcut</span><span class="p">(</span><span class="n">valid</span><span class="p">,</span> <span class="n">q</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">labels</span><span class="o">=</span><span class="n">q_labels</span><span class="p">)</span>
+    <span class="n">q_medians</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s1">'duration_quintile'</span><span class="p">,</span> <span class="n">observed</span><span class="o">=</span><span class="kc">False</span><span class="p">)[</span><span class="s1">'duration_macaulay_clean'</span><span class="p">]</span><span class="o">.</span><span class="n">median</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">'G) Quintile median durations (cleaned):'</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">q_medians</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># Explicit-horizon valuation share diagnostics</span>
+<span class="nb">print</span><span class="p">(</span><span class="s1">'(PV_explicit / PriceClose).describe()'</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">((</span><span class="n">df</span><span class="p">[</span><span class="s1">'PV_explicit'</span><span class="p">]</span> <span class="o">/</span> <span class="n">df</span><span class="p">[</span><span class="s1">'PriceClose'</span><span class="p">])</span><span class="o">.</span><span class="n">describe</span><span class="p">())</span>
 </pre></div>
 </div>
 </div>
@@ -8205,30 +8249,73 @@ $$</p>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>Duration summary:
-count         13797.0
-mean       239.966575
-std       1726.713445
-min       -948.757903
-25%         83.325002
-50%        153.325012
-75%        265.254426
-max      180536.35629
+<pre>A) duration_macaulay describe()
+count         21893.0
+mean        -2.663344
+std        225.030698
+min     -22255.845343
+25%         -1.980825
+50%           5.82534
+75%         10.766629
+max         74.631639
 Name: duration_macaulay, dtype: Float64
-Cross-sectional duration std (first 10 dates):
-date
-2003-12-31    109.435937
-2004-03-31    170.065511
-2004-06-30    152.122344
-2004-09-30    145.199867
-2004-12-31    137.555179
-2005-03-31     44.875224
-2005-06-30    115.901127
-2005-09-30    329.705396
-2005-12-30     95.609727
-2006-03-31    103.053147
-Name: duration_macaulay, dtype: Float64
-Correlation duration vs LTG_decimal: 0.021845
+
+B) duration_macaulay_clean describe()
+count      11552.0
+mean     10.656333
+std       3.212385
+min       5.213471
+25%       8.045518
+50%      10.510642
+75%      13.092822
+max       18.05591
+Name: duration_macaulay_clean, dtype: Float64
+
+C) Share negative terminal residual: 47.1566%
+D) Share duration &gt; 100 before cleaning: 0.0000%
+E) Share retained after cleaning: 52.7657%
+
+F) Cross-sectional std by date (describe):
+count        89.0
+mean      3.02625
+std      0.337686
+min       2.28774
+25%       2.81173
+50%      3.005322
+75%      3.248896
+max      3.862082
+Name: duration_macaulay_clean, dtype: Float64
+
+F) Cross-sectional std by quarter (describe):
+count        89.0
+mean      3.02625
+std      0.337686
+min       2.28774
+25%       2.81173
+50%      3.005322
+75%      3.248896
+max      3.862082
+Name: duration_macaulay_clean, dtype: Float64
+
+G) Quintile median durations (cleaned):
+duration_quintile
+1     6.385313
+2     8.542706
+3    10.510642
+4    12.554538
+5    15.080928
+Name: duration_macaulay_clean, dtype: Float64
+
+(PV_explicit / PriceClose).describe()
+count        21893.0
+mean        1.494035
+std        14.064679
+min        -4.064484
+25%         0.646206
+50%         0.957216
+75%         1.450102
+max      1387.427926
+dtype: Float64
 </pre>
 </div>
 </div>
@@ -8241,48 +8328,21 @@ Correlation duration vs LTG_decimal: 0.021845
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="10)-Winsorize-duration-(1%25-/-99%25)">10) Winsorize duration (1% / 99%)<a class="anchor-link" href="#10)-Winsorize-duration-(1%25-/-99%25)">¶</a></h2>
+<h2 id="10)-Interpretation-Checks">10) Interpretation Checks<a class="anchor-link" href="#10)-Interpretation-Checks">¶</a></h2>
 </div>
 </div>
 </div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=cc8a57d2">
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=cc8a57d2">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
-<div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [11]:</div>
-<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
-<div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="n">q01</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay'</span><span class="p">]</span><span class="o">.</span><span class="n">quantile</span><span class="p">(</span><span class="mf">0.01</span><span class="p">)</span>
-<span class="n">q99</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay'</span><span class="p">]</span><span class="o">.</span><span class="n">quantile</span><span class="p">(</span><span class="mf">0.99</span><span class="p">)</span>
-<span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay'</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay'</span><span class="p">]</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">lower</span><span class="o">=</span><span class="n">q01</span><span class="p">,</span> <span class="n">upper</span><span class="o">=</span><span class="n">q99</span><span class="p">)</span>
-
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'Winsorization bounds: [</span><span class="si">{</span><span class="n">q01</span><span class="si">:</span><span class="s1">.6f</span><span class="si">}</span><span class="s1">, </span><span class="si">{</span><span class="n">q99</span><span class="si">:</span><span class="s1">.6f</span><span class="si">}</span><span class="s1">]'</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'duration_macaulay'</span><span class="p">]</span><span class="o">.</span><span class="n">describe</span><span class="p">())</span>
-</pre></div>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell-outputWrapper">
-<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
-</div>
-<div class="jp-OutputArea jp-Cell-outputArea">
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>Winsorization bounds: [17.695966, 1200.353991]
-count        13797.0
-mean      209.451502
-std       198.270394
-min        17.695966
-25%        83.325002
-50%       153.325012
-75%       265.254426
-max      1200.353991
-Name: duration_macaulay, dtype: Float64
-</pre>
-</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<h3 id="Why-the-old-Gordon-terminal-value-exploded">Why the old Gordon terminal value exploded<a class="anchor-link" href="#Why-the-old-Gordon-terminal-value-exploded">¶</a></h3><p>With a Gordon terminal block, duration can blow up when the denominator <code>(r - g_inf)</code> is small or when growth assumptions imply very large continuation values. That pushes too much PV mass to far-dated cashflows and mechanically inflates Macaulay duration.</p>
+<h3 id="Why-the-price-implied-residual-stabilizes-the-measure">Why the price-implied residual stabilizes the measure<a class="anchor-link" href="#Why-the-price-implied-residual-stabilizes-the-measure">¶</a></h3><p>Using <code>PV_terminal = PriceClose - PV_explicit</code> forces total PV to match the observed stock price exactly. The terminal block is therefore bounded by market valuation, avoiding an unconstrained model-implied terminal explosion.</p>
+<h3 id="Why-this-is-closer-to-implied-equity-duration-logic">Why this is closer to implied equity duration logic<a class="anchor-link" href="#Why-this-is-closer-to-implied-equity-duration-logic">¶</a></h3><p>The construction keeps an explicit forecast horizon (years 1-10) and infers the continuation block from the price residual, which aligns with implied-duration designs in the Dechow-style spirit: explicit near-term fundamentals plus market-implied long-run value.</p>
+<h3 id="Why-this-is-better-for-ECB-shock-regressions">Why this is better for ECB-shock regressions<a class="anchor-link" href="#Why-this-is-better-for-ECB-shock-regressions">¶</a></h3><p>A price-anchored duration is cross-sectionally more stable and less dominated by tail Gordon assumptions. That improves interpretability and reduces mechanical outliers in rate-sensitivity regressions.</p>
 </div>
 </div>
 </div>
@@ -8302,19 +8362,29 @@ Name: duration_macaulay, dtype: Float64
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [12]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [22]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="c1"># Keep all original columns and add key output fields</span>
-<span class="n">output_cols</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">)</span>
+<div class="highlight hl-ipython3"><pre><span></span><span class="c1"># Save final dataframe including requested columns and all existing fields</span>
+<span class="n">required_new_cols</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s1">'duration_macaulay'</span><span class="p">,</span>
+    <span class="s1">'duration_macaulay_clean'</span><span class="p">,</span>
+    <span class="s1">'PV_explicit'</span><span class="p">,</span>
+    <span class="s1">'PV_terminal'</span><span class="p">,</span>
+    <span class="s1">'flag_negative_terminal'</span><span class="p">,</span>
+    <span class="s1">'flag_bad_duration'</span><span class="p">,</span>
+<span class="p">]</span>
 
-<span class="c1"># Persist result to intermediate folder</span>
+<span class="n">missing_new</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">required_new_cols</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">]</span>
+<span class="k">if</span> <span class="n">missing_new</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s1">'Missing required output columns: </span><span class="si">{</span><span class="n">missing_new</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
+
 <span class="n">DATA_DIR</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <span class="n">df</span><span class="o">.</span><span class="n">to_parquet</span><span class="p">(</span><span class="n">OUTPUT_PATH</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'Saved: </span><span class="si">{</span><span class="n">OUTPUT_PATH</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'Saved: </span><span class="si">{</span><span class="n">OUTPUT_PATH</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'Rows saved: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">:</span><span class="s1">,</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s1">'Added fields include duration_macaulay and TV_share.'</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s1">'Saved fields include duration_macaulay, duration_macaulay_clean, PV_explicit, PV_terminal, and flags.'</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -8328,8 +8398,8 @@ Name: duration_macaulay, dtype: Float64
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
 <pre>Saved: /Users/jakob/Documents/Parforceleistung/Studium/MSc Economics/Masterarbeit/Project_Data/intermediate/EQDuration_Macaulay.parquet
-Rows saved: 21,896
-Added fields include duration_macaulay and TV_share.
+Rows saved: 21,893
+Saved fields include duration_macaulay, duration_macaulay_clean, PV_explicit, PV_terminal, and flags.
 </pre>
 </div>
 </div>

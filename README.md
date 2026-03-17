@@ -13,3 +13,8 @@ This repository contains the code and analysis for my MSc Economics master thesi
 - `EQDuration_NetPayout.ipynb`: Computes equity duration using a net-payout approach.
 - `ECBShocks_Regressions.ipynb`: Runs panel regressions of ECB shocks on returns with duration interactions.
 
+## Python Files
+
+- `lseg_series_puller.py`: Shared pull engine for LSEG series and daily returns (batching, caching, resume/checkpoint, bad-id handling).
+- `plot_style.py`: Shared plotting style helpers used across notebooks.
+

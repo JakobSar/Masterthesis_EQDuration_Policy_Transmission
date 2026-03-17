@@ -25,6 +25,7 @@ class SeriesPullConfig:
     base_sleep_sec: float = 0.4
     batch_size: int = 10
     batch_pause_sec: float = 0.0
+    prefetch_start_days: int = 0
     min_asof_date: pd.Timestamp = pd.Timestamp("1900-01-01")
     force_refresh: bool = False
     cache_only: bool = False
@@ -36,6 +37,7 @@ class SeriesPullConfig:
     # Optional per-firm candidate overrides. Entries are prepended to auto-built candidates.
     # Example: {"FIRM0000602": [("RIC", "NAFGn.DE"), ("RIC", "NAFG.DE")]}
     candidate_overrides: dict[str, list[tuple[str, str]]] | None = None
+    debug_raw_first_n: int = 0
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,52 @@ def _ensure_parent(path: Path) -> None:
 def _is_rate_limit_message(msg: str) -> bool:
     m = str(msg).lower()
     return ("too many requests" in m) or ("rate limit" in m) or ("http 429" in m) or ("status 429" in m)
+
+
+def _is_desktop_proxy_protocol_error(msg: str) -> bool:
+    m = str(msg).lower()
+    return ("localhost:9000" in m) and ("illegal status line" in m)
+
+
+def _format_session_open_error(err: Exception) -> str:
+    msg = str(err)
+    base = f"LSEG session could not be opened. Last error: {msg}"
+    if _is_desktop_proxy_protocol_error(msg):
+        return (
+            base
+            + "\nLikely cause: stale/wrong service on Desktop proxy port 9000 (protocol mismatch)."
+            + "\nSuggested fix:"
+            + "\n1) Restart LSEG Workspace/Eikon and wait until fully connected."
+            + "\n2) Ensure no stale local process occupies port 9000."
+            + "\n3) Re-run the notebook pull cell."
+        )
+    return base
+
+
+def _open_lseg_session_with_retries(max_attempts: int = 3, base_sleep_sec: float = 1.0) -> None:
+    last_err: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            # Best-effort cleanup for stale session state before re-opening.
+            try:
+                ld.close_session()
+            except Exception:
+                pass
+            ld.open_session()
+            return
+        except Exception as e:
+            last_err = e
+            if attempt < max_attempts:
+                time.sleep(base_sleep_sec * attempt)
+    if last_err is not None:
+        raise RuntimeError(_format_session_open_error(last_err)) from last_err
+
+
+def _safe_close_lseg_session() -> None:
+    try:
+        ld.close_session()
+    except Exception:
+        pass
 
 
 BAD_IDS_COLUMNS = ["firm_id", "last_failed_at", "reason", "n_candidates", "tried_ids"]
@@ -112,6 +160,35 @@ def append_bad_ids_rows(path: Path, rows: list[dict]) -> pd.DataFrame:
         out = old.copy()
     out = out.dropna(subset=["firm_id", "last_failed_at"]).copy()
     out = out.sort_values(["firm_id", "last_failed_at"]).drop_duplicates(subset=["firm_id"], keep="last")
+    _ensure_parent(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    out.to_csv(tmp, index=False)
+    tmp.replace(path)
+    return out.reset_index(drop=True)
+
+
+def append_bad_rows_log(path: Path, rows: list[dict]) -> pd.DataFrame:
+    if not rows:
+        if path.exists():
+            try:
+                return pd.read_csv(path)
+            except Exception:
+                return pd.DataFrame()
+        return pd.DataFrame()
+
+    new = pd.DataFrame(rows)
+    if path.exists():
+        try:
+            old = pd.read_csv(path)
+        except Exception:
+            old = pd.DataFrame()
+        out = pd.concat([old, new], ignore_index=True)
+    else:
+        out = new
+
+    if "date" in out.columns:
+        out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.normalize()
+    out = out.drop_duplicates(subset=[c for c in ["firm_id", "date", "reason"] if c in out.columns], keep="last")
     _ensure_parent(path)
     tmp = path.with_suffix(path.suffix + ".tmp")
     out.to_csv(tmp, index=False)
@@ -217,12 +294,27 @@ def extract_history_multi(raw: pd.DataFrame, specs: list[SeriesFieldSpec]) -> pd
         return pd.DataFrame(columns=["date", *output_cols])
 
     # get_history often returns dates in the index; normalize by materializing the index.
+    # get_data for fundamentals may return PeriodEndDate in a dedicated column.
     x = pd.DataFrame(raw).copy().reset_index()
-    date_col = None
+
+    def _norm(t: str) -> str:
+        return re.sub(r"[^A-Z0-9]", "", str(t).upper())
+
+    date_candidates = []
     for c in x.columns:
-        if str(c).lower() in {"date", "timestamp"}:
+        cn = _norm(c)
+        if ("DATE" in cn) or ("TIMESTAMP" in cn) or ("PERIODEND" in cn):
+            date_candidates.append(c)
+    if not date_candidates:
+        date_candidates = list(x.columns)
+
+    date_col = None
+    best_n = -1
+    for c in date_candidates:
+        n_ok = int(pd.to_datetime(x[c], errors="coerce").notna().sum())
+        if n_ok > best_n:
+            best_n = n_ok
             date_col = c
-            break
     if date_col is None:
         date_col = x.columns[0]
 
@@ -234,10 +326,23 @@ def extract_history_multi(raw: pd.DataFrame, specs: list[SeriesFieldSpec]) -> pd
 
     value_cols = [c for c in x.columns if c != date_col and c not in id_like]
 
-    def _norm(t: str) -> str:
-        return str(t).upper().replace(" ", "")
+    def _field_token(field_expr: str) -> str:
+        m = re.search(r"TR\\.F\\.([A-Z0-9_]+)", str(field_expr), flags=re.IGNORECASE)
+        return _norm(m.group(1)) if m else _norm(field_expr)
 
     value_cols_norm = {c: _norm(c) for c in value_cols}
+    fallback_tokens_by_output = {
+        "BE": ["COMMONEQUITYTOTAL", "COMMONEQUITY", "EQUITYTOTAL", "COMEQTOT"],
+        "assets": ["TOTALASSETS", "TOTASSETS", "ASSETSTOTAL"],
+        "debt": ["DEBTTOTAL", "TOTALDEBT", "DEBTTOT"],
+        "Sales": ["TOTREVENUE", "TOTALREVENUE", "REVENUE", "SALES"],
+        "NetIncome": ["NETINCAFTERTAX", "NETINCOMEAFTERTAX", "NETINCOME", "NETPROFIT"],
+        "GrossProfit": ["GROSSPROFINDPROPTOT", "GROSSPROFIT", "GROSSPROF"],
+        "Cogs": ["COGSTOT", "COGS", "COSTOFGOODSSOLD"],
+        "Dividends": ["DIVPAIDCASHTOTCF", "DIVIDENDS", "DIVPAID"],
+        "Buybacks": ["COMSTOCKBUYBACKNET", "BUYBACK", "REPURCHASE"],
+        "CashSTInvst": ["CASHSTINVST", "CASHANDSHORTTERMINVESTMENTS", "CASHSHORTTERMINVESTMENTS"],
+    }
 
     out = pd.DataFrame({"date": pd.to_datetime(x[date_col], errors="coerce").dt.normalize()})
     out = out.dropna(subset=["date"]).sort_values("date").drop_duplicates(["date"], keep="last")
@@ -245,13 +350,24 @@ def extract_history_multi(raw: pd.DataFrame, specs: list[SeriesFieldSpec]) -> pd
     for sp in specs:
         picked = None
         for f in sp.fields:
-            fn = _norm(f)
+            fn = _field_token(f)
             for c in value_cols:
-                if fn in value_cols_norm[c]:
+                if fn and ((fn in value_cols_norm[c]) or (value_cols_norm[c] in fn)):
                     picked = c
                     break
             if picked is not None:
                 break
+
+        if picked is None:
+            for tok in fallback_tokens_by_output.get(sp.output_col, []):
+                tn = _norm(tok)
+                for c in value_cols:
+                    cn = value_cols_norm[c]
+                    if tn and ((tn in cn) or (cn in tn)):
+                        picked = c
+                        break
+                if picked is not None:
+                    break
 
         if picked is None and len(value_cols) == 1 and len(specs) == 1:
             picked = value_cols[0]
@@ -319,6 +435,7 @@ class StandardSeriesPuller:
         self.checkpoint_path = checkpoint_path
         self.bad_ids_path = bad_ids_path
         self.bad_rows_log_path = bad_rows_log_path
+        self._debug_raw_left = int(max(0, getattr(self.cfg, "debug_raw_first_n", 0) or 0))
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         _ensure_parent(self.step_rows_path)
         _ensure_parent(self.checkpoint_path)
@@ -391,6 +508,41 @@ class StandardSeriesPuller:
         d.to_parquet(tmp, index=False)
         tmp.replace(path)
 
+    def _merge_histories(self, left: pd.DataFrame, right: pd.DataFrame) -> pd.DataFrame:
+        if left is None or left.empty:
+            out = right.copy() if (right is not None) else self._empty_hist()
+        elif right is None or right.empty:
+            out = left.copy()
+        else:
+            l = left.copy()
+            r = right.copy()
+            l["date"] = pd.to_datetime(l.get("date"), errors="coerce").dt.normalize()
+            r["date"] = pd.to_datetime(r.get("date"), errors="coerce").dt.normalize()
+            for c in self.output_cols:
+                if c not in l.columns:
+                    l[c] = np.nan
+                if c not in r.columns:
+                    r[c] = np.nan
+            l = l[["date", *self.output_cols]]
+            r = r[["date", *self.output_cols]]
+
+            out = l.merge(r, on="date", how="outer", suffixes=("", "_r"))
+            for c in self.output_cols:
+                lc = pd.to_numeric(out.get(c), errors="coerce")
+                rc = pd.to_numeric(out.get(f"{c}_r"), errors="coerce")
+                # Prefer existing left value; fall back to right value without combine_first
+                # to avoid pandas FutureWarning around concat with empty entries.
+                out[c] = lc.where(lc.notna(), rc)
+                out = out.drop(columns=[f"{c}_r"], errors="ignore")
+
+        out["date"] = pd.to_datetime(out.get("date"), errors="coerce").dt.normalize()
+        for c in self.output_cols:
+            if c not in out.columns:
+                out[c] = np.nan
+            out[c] = pd.to_numeric(out[c], errors="coerce")
+        out = out.dropna(subset=["date"]).sort_values("date").drop_duplicates(["date"], keep="last")
+        return out[["date", *self.output_cols]].reset_index(drop=True)
+
     def _pull_segment(self, pull_id: str, start: pd.Timestamp, end: pd.Timestamp, id_type: str | None = None) -> tuple[pd.DataFrame, bool]:
         if pd.isna(start) or pd.isna(end) or start > end:
             return self._empty_hist(), False
@@ -406,12 +558,16 @@ class StandardSeriesPuller:
                 if iv not in intervals:
                     intervals.append(iv)
 
+        # Fundamental TR.F.* fields are more reliable via get_data(+Frq) than get_history.
+        is_fundamental_pull = bool(all_fields) and all(str(f).strip().upper().startswith("TR.F.") for f in all_fields)
+        period_end_field = "TR.F.PeriodEndDate(Period=FY0)"
+
         id_type_u = str(id_type or "").upper().strip()
         universe_variants = [str(pull_id).strip()]
         if id_type_u == "ISIN":
             base = str(pull_id).strip()
             plain = base.split(":", 1)[1].strip() if base.upper().startswith("ISIN:") else base
-            universe_variants = [plain] if plain else []
+            universe_variants = [x for x in [plain, f"ISIN:{plain}" if plain else ""] if x]
 
         saw_unresolvable = False
         saw_non_error_response = False
@@ -427,30 +583,59 @@ class StandardSeriesPuller:
                 if unresolved_for_this_id:
                     break
                 for field_list in field_plans:
+                    active_specs = [sp for sp in self.series_specs if any(f in field_list for f in sp.fields)]
+                    if not active_specs:
+                        active_specs = list(self.series_specs)
                     last_err = None
                     for r in range(self.cfg.max_retries):
                         try:
-                            raw = ld.get_history(
-                                universe=[universe_id],
-                                fields=field_list,
-                                start=start.strftime("%Y-%m-%d"),
-                                end=end.strftime("%Y-%m-%d"),
-                                interval=interval,
-                            )
+                            if is_fundamental_pull:
+                                req_fields = [period_end_field] + [f for f in field_list if str(f) != period_end_field]
+                                raw = ld.get_data(
+                                    universe=[universe_id],
+                                    fields=req_fields,
+                                    parameters={
+                                        "SDate": start.strftime("%Y-%m-%d"),
+                                        "EDate": end.strftime("%Y-%m-%d"),
+                                        "Frq": "FY",
+                                    },
+                                )
+                            else:
+                                raw = ld.get_history(
+                                    universe=[universe_id],
+                                    fields=field_list,
+                                    start=start.strftime("%Y-%m-%d"),
+                                    end=end.strftime("%Y-%m-%d"),
+                                    interval=interval,
+                                )
+                            if isinstance(raw, tuple) and len(raw) > 0:
+                                raw = raw[0]
+                            if self._debug_raw_left > 0:
+                                try:
+                                    _dbg = pd.DataFrame(raw).copy().reset_index()
+                                    dbg_cols = [str(c) for c in _dbg.columns]
+                                    dbg_cols_short = dbg_cols[:40]
+                                    dbg_head = _dbg.head(3).to_string(index=False)
+                                    fld = ",".join([str(f) for f in field_list])
+                                    print(
+                                        f"[DEBUG RAW] id={universe_id} id_type={id_type_u or 'NA'} "
+                                        f"field_list=[{fld}] interval={interval} rows={len(_dbg)} cols={len(dbg_cols)}"
+                                    )
+                                    print(f"[DEBUG RAW] columns: {dbg_cols_short}")
+                                    print(f"[DEBUG RAW] head(3):\n{dbg_head}")
+                                except Exception as _e:
+                                    print(f"[DEBUG RAW] failed to render preview for id={universe_id}: {_e}")
+                                self._debug_raw_left -= 1
                             saw_non_error_response = True
-                            out = extract_history_multi(raw, self.series_specs)
+                            out = extract_history_multi(raw, active_specs)
+                            # Align partial pulls (single-field fallback) to full output schema.
+                            for c in self.output_cols:
+                                if c not in out.columns:
+                                    out[c] = np.nan
+                            out = out[["date", *self.output_cols]] if "date" in out.columns else self._empty_hist()
                             has_values = bool(out[self.output_cols].notna().any().any()) if (not out.empty) else False
                             if has_values:
-                                frames = [x for x in [out_acc, out] if not x.empty]
-                                if frames:
-                                    out_acc = (
-                                        pd.concat(frames, ignore_index=True)
-                                        .sort_values("date")
-                                        .drop_duplicates(["date"], keep="last")
-                                        .reset_index(drop=True)
-                                    )
-                                else:
-                                    out_acc = self._empty_hist()
+                                out_acc = self._merge_histories(out_acc, out)
                                 # If we have at least one value for every output column, stop early.
                                 if bool(out_acc[self.output_cols].notna().any().all()):
                                     return out_acc, False
@@ -502,8 +687,7 @@ class StandardSeriesPuller:
             return cached, False
 
         pulled, permanent_bad_id = self._pull_segment(pull_id=pull_id, start=start, end=end, id_type=id_type)
-        frames = [x for x in [cached, pulled] if not x.empty]
-        out = pd.concat(frames, ignore_index=True).sort_values("date").drop_duplicates(["date"], keep="last") if frames else self._empty_hist()
+        out = self._merge_histories(cached, pulled)
         if (not out.empty) or self.cfg.force_refresh:
             self._save_cache(path, out)
         return out, permanent_bad_id
@@ -560,7 +744,7 @@ class StandardSeriesPuller:
         bad_before_set = set(bad_hist_before["firm_id"].astype(str).tolist()) if not bad_hist_before.empty else set()
         known_bad_recent = (
             load_bad_firm_ids(self.bad_ids_path, cooldown_days=self.cfg.bad_id_cooldown_days)
-            if (self.cfg.skip_known_bad_ids and (not self.cfg.force_refresh))
+            if self.cfg.skip_known_bad_ids
             else set()
         )
         bad_ids_firms = set([f for f in no_coverage_firms if f in known_bad_recent])
@@ -596,7 +780,7 @@ class StandardSeriesPuller:
         new_rows_out: list[dict] = []
 
         if not self.cfg.cache_only:
-            ld.open_session()
+            _open_lseg_session_with_retries()
         try:
             for b_ix, b_start in enumerate(range(0, len(companies), self.cfg.batch_size), start=1):
                 b_end = min(len(companies), b_start + self.cfg.batch_size)
@@ -613,6 +797,8 @@ class StandardSeriesPuller:
                         continue
                     start = pd.to_datetime(req_dates.min()).normalize()
                     end = pd.to_datetime(req_dates.max()).normalize()
+                    prefetch_days = int(max(0, getattr(self.cfg, "prefetch_start_days", 0) or 0))
+                    pull_start = (start - pd.Timedelta(days=prefetch_days)).normalize() if prefetch_days > 0 else start
 
                     panel = pd.DataFrame({"date": req_dates})
                     for c in self.output_cols:
@@ -641,7 +827,7 @@ class StandardSeriesPuller:
                             firm_id=str(firm_id),
                             id_type=cand_type,
                             pull_id=cand_id,
-                            start=start,
+                            start=pull_start,
                             end=end,
                         )
                         if permanent_bad_id:
@@ -686,10 +872,14 @@ class StandardSeriesPuller:
                     pulled_range = "NA:NA" if resolved_dates.empty else f"{resolved_dates.min().date()}:{resolved_dates.max().date()}"
                     range_in_index = f"{start.date()}:{end.date()}"
                     tried_preview = " | ".join(dict.fromkeys(attempted_ids)) if attempted_ids else "NA"
+                    found_parts = []
+                    for c in self.output_cols:
+                        found_parts.append(f"found_{c}={int(panel[c].notna().sum())}")
+                    found_msg = " | ".join(found_parts)
                     print(
                         f"[BATCH {b_ix}/{n_batches}] [{b_start+k}/{len(companies)}] "
                         f"firm_id={firm_id} | cand_used={cand_used}/{len(cands)} | "
-                        f"unresolved={unresolved} | found_{self.primary_col}={resolved} | "
+                        f"unresolved={unresolved} | {found_msg} | "
                         f"range_in_index={range_in_index} | pulled_range={pulled_range} | tried_ids: {tried_preview}"
                     )
 
@@ -722,6 +912,9 @@ class StandardSeriesPuller:
 
                 # Persist bad_ids incrementally per batch so progress survives interruptions.
                 if batch_bad_rows:
+                    if self.bad_rows_log_path is not None:
+                        append_bad_rows_log(self.bad_rows_log_path, batch_bad_rows)
+
                     batch_bad_df = pd.DataFrame(batch_bad_rows)
                     if "reason" in batch_bad_df.columns:
                         batch_bad_df = batch_bad_df[batch_bad_df["reason"] == "no_data_all_candidates"].copy()
@@ -746,21 +939,7 @@ class StandardSeriesPuller:
                     time.sleep(self.cfg.batch_pause_sec)
         finally:
             if not self.cfg.cache_only:
-                try:
-                    ld.close_session()
-                except Exception:
-                    pass
-
-        if bad_rows and (self.bad_rows_log_path is not None):
-            bad_df = pd.DataFrame(bad_rows)
-            if self.bad_rows_log_path.exists():
-                old = pd.read_csv(self.bad_rows_log_path)
-                out = pd.concat([old, bad_df], ignore_index=True)
-            else:
-                out = bad_df
-            out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.normalize()
-            out = out.drop_duplicates(subset=["firm_id", "date", "reason"], keep="last")
-            out.to_csv(self.bad_rows_log_path, index=False)
+                _safe_close_lseg_session()
 
         bad_id_rows = []
         if bad_rows:
@@ -1216,7 +1395,7 @@ def _run_daily_returns_internal(
     bad_hist_before = _load_bad_ids_table(bad_ids_path)
     bad_known_firms = (
         load_bad_firm_ids(bad_ids_path, cooldown_days=cfg.bad_id_cooldown_days)
-        if (cfg.skip_known_bad_ids and not cfg.force_refresh)
+        if cfg.skip_known_bad_ids
         else set()
     )
     step_rows: list[dict] = []
@@ -1326,7 +1505,7 @@ def _run_daily_returns_internal(
     print("=" * 88)
 
     if not cfg.skip_lseg_pull:
-        ld.open_session()
+        _open_lseg_session_with_retries()
     try:
         pull_rows = cpm[cpm["firm_id"].astype("string").isin(remaining_firms)].copy()
         total = len(pull_rows)
@@ -1493,10 +1672,7 @@ def _run_daily_returns_internal(
                 break
     finally:
         if not cfg.skip_lseg_pull:
-            try:
-                ld.close_session()
-            except Exception:
-                pass
+            _safe_close_lseg_session()
 
     manifest_df = pd.DataFrame(manifest_rows)
     manifest_df.to_parquet(manifest_path, index=False)

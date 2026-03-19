@@ -11,7 +11,8 @@ This repository contains the code and analysis for my MSc Economics master thesi
 - `LSEG_DataPull_Netpayout.ipynb`: Pulls the LSEG raw inputs required for net-payout-based duration.
 - `EQDuration_Macaulay.ipynb`: Computes equity duration using a Macaulay-style approach based on prepared firm-level data.
 - `EQDuration_NetPayout.ipynb`: Computes equity duration using a net-payout approach.
-- `ECBShocks_Regressions.ipynb`: Runs panel regressions of ECB shocks on returns with duration interactions.
+- `ECBShocks_Equitys_Regressions.ipynb`: Runs firm-level panel regressions of ECB shocks on equity returns with duration interactions.
+- `ECBShocks_Index_Regressions.ipynb`: Runs index-level regressions of ECB shocks on Euro500 and benchmark index returns.
 
 ## Python Files
 

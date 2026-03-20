@@ -1,0 +1,14 @@
+{
+  "language": "german",
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(python:*)",
+      "Bash(pip:*)",
+      "Bash(git:*)"
+    ],
+    "additionalDirectories": [
+      "/Users/jakob/Documents/Parforceleistung/Studium/MSc Economics/Masterarbeit"
+    ]
+  }
+}

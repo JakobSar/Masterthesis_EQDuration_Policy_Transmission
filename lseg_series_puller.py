@@ -574,7 +574,8 @@ class StandardSeriesPuller:
         if id_type_u == "ISIN":
             base = str(pull_id).strip()
             plain = base.split(":", 1)[1].strip() if base.upper().startswith("ISIN:") else base
-            universe_variants = [x for x in [plain, f"ISIN:{plain}" if plain else ""] if x]
+            # Never request ISIN-prefixed identifiers against LSEG; use plain ISIN only.
+            universe_variants = [x for x in [plain] if x]
 
         saw_unresolvable = False
         saw_non_error_response = False
@@ -877,7 +878,6 @@ class StandardSeriesPuller:
 
                     resolved_dates = pd.to_datetime(panel.loc[panel[self.primary_col].notna(), "date"], errors="coerce").dropna()
                     pulled_range = "NA:NA" if resolved_dates.empty else f"{resolved_dates.min().date()}:{resolved_dates.max().date()}"
-                    range_in_index = f"{start.date()}:{end.date()}"
                     tried_preview = " | ".join(dict.fromkeys(attempted_ids)) if attempted_ids else "NA"
                     found_parts = []
                     for c in self.output_cols:
@@ -887,7 +887,7 @@ class StandardSeriesPuller:
                         f"[BATCH {b_ix}/{n_batches}] [{b_start+k}/{len(companies)}] "
                         f"firm_id={firm_id} | cand_used={cand_used}/{len(cands)} | "
                         f"unresolved={unresolved} | {found_msg} | "
-                        f"range_in_index={range_in_index} | pulled_range={pulled_range} | tried_ids: {tried_preview}"
+                        f"pulled_range={pulled_range} | tried_ids: {tried_preview}"
                     )
 
                 if batch_new_rows:
@@ -1283,6 +1283,10 @@ def _dr_pull_one_company_returns(
     base_sleep: float = 0.7,
 ) -> tuple[pd.DataFrame, str | None, str | None]:
     id_type = (id_type or "").upper()
+    if id_type == "ISIN":
+        # Never request ISIN-prefixed identifiers against LSEG; use plain ISIN only.
+        base = str(pull_id).strip()
+        pull_id = base.split(":", 1)[1].strip() if base.upper().startswith("ISIN:") else base
     if id_type == "ISIN":
         plans = [("TR.TotalReturn", "return_like"), ("TR.PriceClose", "price_level"), ("TRDPRC_1", "price_level")]
     else:

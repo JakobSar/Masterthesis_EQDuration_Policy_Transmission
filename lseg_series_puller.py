@@ -429,6 +429,14 @@ def extract_history_multi(raw: pd.DataFrame, specs: list[SeriesFieldSpec]) -> pd
     return out[["date", *output_cols]]
 
 
+def _is_date_output_col(col_name: str) -> bool:
+    """Returns True for output columns that hold date strings rather than numeric values."""
+    _date_suffixes = ("_fye", "_periodenddate", "_fyend", "_yearend")
+    _date_exact = {"FiscalYearEnd", "fiscal_year_end"}
+    cl = col_name.lower()
+    return col_name in _date_exact or any(cl.endswith(s) for s in _date_suffixes)
+
+
 def map_history_to_asof_multi(req_dates: pd.Series, hist: pd.DataFrame, output_cols: list[str], tol_days: int) -> pd.DataFrame:
     left = pd.DataFrame({"date": pd.to_datetime(req_dates, errors="coerce").dt.normalize()}).dropna().sort_values("date")
     if left.empty:
@@ -444,7 +452,8 @@ def map_history_to_asof_multi(req_dates: pd.Series, hist: pd.DataFrame, output_c
     for c in output_cols:
         if c not in right.columns:
             right[c] = np.nan
-        right[c] = pd.to_numeric(right[c], errors="coerce")
+        elif not _is_date_output_col(c):
+            right[c] = pd.to_numeric(right[c], errors="coerce")
     right = right.dropna(subset=["date"]).sort_values("date").drop_duplicates(["date"], keep="last")
 
     return pd.merge_asof(
@@ -507,7 +516,8 @@ class StandardSeriesPuller:
         for c in self.output_cols:
             if c not in x.columns:
                 x[c] = np.nan
-            x[c] = pd.to_numeric(x[c], errors="coerce")
+            elif not _is_date_output_col(c):
+                x[c] = pd.to_numeric(x[c], errors="coerce")
         for c in ["rank", "id_type", "pull_id"]:
             if c not in x.columns:
                 x[c] = pd.NA
@@ -533,7 +543,8 @@ class StandardSeriesPuller:
         for c in self.output_cols:
             if c not in d.columns:
                 d[c] = np.nan
-            d[c] = pd.to_numeric(d[c], errors="coerce")
+            elif not _is_date_output_col(c):
+                d[c] = pd.to_numeric(d[c], errors="coerce")
         d = d.dropna(subset=["date"]).sort_values("date").drop_duplicates(["date"], keep="last")
         return d[["date", *self.output_cols]]
 
@@ -543,7 +554,8 @@ class StandardSeriesPuller:
         for c in self.output_cols:
             if c not in d.columns:
                 d[c] = np.nan
-            d[c] = pd.to_numeric(d[c], errors="coerce")
+            elif not _is_date_output_col(c):
+                d[c] = pd.to_numeric(d[c], errors="coerce")
         d = d.dropna(subset=["date"]).sort_values("date").drop_duplicates(["date"], keep="last")
         _ensure_parent(path)
         tmp = path.with_suffix(path.suffix + ".tmp")
@@ -570,18 +582,25 @@ class StandardSeriesPuller:
 
             out = l.merge(r, on="date", how="outer", suffixes=("", "_r"))
             for c in self.output_cols:
-                lc = pd.to_numeric(out.get(c), errors="coerce")
-                rc = pd.to_numeric(out.get(f"{c}_r"), errors="coerce")
-                # Prefer existing left value; fall back to right value without combine_first
-                # to avoid pandas FutureWarning around concat with empty entries.
-                out[c] = lc.where(lc.notna(), rc)
+                if _is_date_output_col(c):
+                    # String date columns: prefer left, fall back to right.
+                    lc = out.get(c, pd.Series(pd.NA, index=out.index))
+                    rc = out.get(f"{c}_r", pd.Series(pd.NA, index=out.index))
+                    out[c] = lc.where(lc.notna(), rc)
+                else:
+                    lc = pd.to_numeric(out.get(c), errors="coerce")
+                    rc = pd.to_numeric(out.get(f"{c}_r"), errors="coerce")
+                    # Prefer existing left value; fall back to right value without combine_first
+                    # to avoid pandas FutureWarning around concat with empty entries.
+                    out[c] = lc.where(lc.notna(), rc)
                 out = out.drop(columns=[f"{c}_r"], errors="ignore")
 
         out["date"] = pd.to_datetime(out.get("date"), errors="coerce").dt.normalize()
         for c in self.output_cols:
             if c not in out.columns:
                 out[c] = np.nan
-            out[c] = pd.to_numeric(out[c], errors="coerce")
+            elif not _is_date_output_col(c):
+                out[c] = pd.to_numeric(out[c], errors="coerce")
         out = out.dropna(subset=["date"]).sort_values("date").drop_duplicates(["date"], keep="last")
         return out[["date", *self.output_cols]].reset_index(drop=True)
 

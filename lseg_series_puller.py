@@ -331,24 +331,53 @@ def extract_history_multi(raw: pd.DataFrame, specs: list[SeriesFieldSpec]) -> pd
         return _norm(m.group(1)) if m else _norm(field_expr)
 
     value_cols_norm = {c: _norm(c) for c in value_cols}
+
+    # Output columns that should be kept as dates (strings), not coerced to numeric.
+    _date_output_suffixes = ("_fye", "_periodenddate", "_fyend", "_yearend")
+    _date_output_exact = {"FiscalYearEnd", "fiscal_year_end"}
+
+    def _is_date_output(col_name: str) -> bool:
+        cl = col_name.lower()
+        if col_name in _date_output_exact:
+            return True
+        return any(cl.endswith(s) for s in _date_output_suffixes)
+
     fallback_tokens_by_output = {
+        # Fundamentals
         "BE": ["COMMONEQUITYTOTAL", "COMMONEQUITY", "EQUITYTOTAL", "COMEQTOT"],
         "assets": ["TOTALASSETS", "TOTASSETS", "ASSETSTOTAL"],
         "debt": ["DEBTTOTAL", "TOTALDEBT", "DEBTTOT"],
         "Sales": ["TOTREVENUE", "TOTALREVENUE", "REVENUE", "SALES"],
         "NetIncome": ["NETINCAFTERTAX", "NETINCOMEAFTERTAX", "NETINCOME", "NETPROFIT"],
         "GrossProfit": ["GROSSPROFINDPROPTOT", "GROSSPROFIT", "GROSSPROF"],
-        "Cogs": [
-            "COGSTOT",
-            "COGS",
-            "COSTOFGOODSSOLD",
-            "COSTOFREVENUE",
-            "COSTOFREVENUETOTAL",
-            "TOTALCOSTOFREVENUE",
-        ],
+        "Cogs": ["COGSTOT", "COGS", "COSTOFGOODSSOLD", "COSTOFREVENUE", "COSTOFREVENUETOTAL", "TOTALCOSTOFREVENUE"],
         "Dividends": ["DIVPAIDCASHTOTCF", "DIVIDENDS", "DIVPAID"],
         "Buybacks": ["COMSTOCKBUYBACKNET", "BUYBACK", "REPURCHASE"],
         "CashSTInvst": ["CASHSTINVST", "CASHANDSHORTTERMINVESTMENTS", "CASHSHORTTERMINVESTMENTS"],
+        # Analyst consensus – numeric
+        "DPS_fy1_est": ["DPSMEAN", "DPS"],
+        "DPS_fy2_est": ["DPSMEAN", "DPS"],
+        "DPS_fy3_est": ["DPSMEAN", "DPS"],
+        "DPS_fy4_est": ["DPSMEAN", "DPS"],
+        "DPS_fy5_est": ["DPSMEAN", "DPS"],
+        "CFPS_fy1_est": ["CFPSMEAN", "CFPS"],
+        "CFPS_fy2_est": ["CFPSMEAN", "CFPS"],
+        "CFPS_fy3_est": ["CFPSMEAN", "CFPS"],
+        "CFPS_fy4_est": ["CFPSMEAN", "CFPS"],
+        "CFPS_fy5_est": ["CFPSMEAN", "CFPS"],
+        "NumAnalysts_fy1": ["NUMBEROFANALYSTS", "NUMANALYSTS", "ANALYSTS"],
+        "NumAnalysts_fy2": ["NUMBEROFANALYSTS", "NUMANALYSTS", "ANALYSTS"],
+        "NumAnalysts_fy3": ["NUMBEROFANALYSTS", "NUMANALYSTS", "ANALYSTS"],
+        "NumAnalysts_fy4": ["NUMBEROFANALYSTS", "NUMANALYSTS", "ANALYSTS"],
+        "NumAnalysts_fy5": ["NUMBEROFANALYSTS", "NUMANALYSTS", "ANALYSTS"],
+        "LTG_est": ["LTGMEAN", "LTG", "LONGTERMGROWTH"],
+        # Analyst consensus – date outputs
+        "FYE_fy1": ["PERIODENDDATE", "FISCALYEAREND", "FYEND"],
+        "FYE_fy2": ["PERIODENDDATE", "FISCALYEAREND", "FYEND"],
+        "FYE_fy3": ["PERIODENDDATE", "FISCALYEAREND", "FYEND"],
+        "FYE_fy4": ["PERIODENDDATE", "FISCALYEAREND", "FYEND"],
+        "FYE_fy5": ["PERIODENDDATE", "FISCALYEAREND", "FYEND"],
+        "FiscalYearEnd": ["FISCALYEAREND", "FYEND", "YEAREND"],
     }
 
     out = pd.DataFrame({"date": pd.to_datetime(x[date_col], errors="coerce").dt.normalize()})
@@ -382,12 +411,18 @@ def extract_history_multi(raw: pd.DataFrame, specs: list[SeriesFieldSpec]) -> pd
         if picked is None:
             out[sp.output_col] = np.nan
         else:
-            tmp = pd.DataFrame(
-                {
+            if _is_date_output(sp.output_col):
+                # Keep as normalized date string (YYYY-MM-DD), not numeric.
+                raw_dates = pd.to_datetime(x[picked], errors="coerce").dt.normalize()
+                tmp = pd.DataFrame({
+                    "date": pd.to_datetime(x[date_col], errors="coerce").dt.normalize(),
+                    sp.output_col: raw_dates.dt.strftime("%Y-%m-%d").where(raw_dates.notna(), other=pd.NA),
+                })
+            else:
+                tmp = pd.DataFrame({
                     "date": pd.to_datetime(x[date_col], errors="coerce").dt.normalize(),
                     sp.output_col: pd.to_numeric(x[picked], errors="coerce"),
-                }
-            )
+                })
             tmp = tmp.dropna(subset=["date"]).sort_values("date").drop_duplicates(["date"], keep="last")
             out = out.merge(tmp, on="date", how="left")
 

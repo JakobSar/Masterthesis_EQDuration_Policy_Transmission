@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from cycler import cycler
 
-MIN_PLOT_DATE = datetime(1999, 1, 1)
-LABEL_START_DATE = datetime(2000, 1, 1)
+MIN_PLOT_DATE = datetime(1998, 1, 1)
+LABEL_START_DATE = datetime(1999, 1, 1)
 LABEL_EVERY_YEARS = 2
 
 COLORS = {

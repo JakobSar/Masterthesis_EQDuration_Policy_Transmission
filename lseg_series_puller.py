@@ -649,7 +649,9 @@ class StandardSeriesPuller:
                     if not active_specs:
                         active_specs = list(self.series_specs)
                     last_err = None
-                    for r in range(self.cfg.max_retries):
+                    # Retry semantics: 0 means "one initial attempt, no extra retries".
+                    n_attempts = max(1, int(self.cfg.max_retries) + 1)
+                    for r in range(n_attempts):
                         try:
                             if is_fundamental_pull:
                                 req_fields = [period_end_field] + [f for f in field_list if str(f) != period_end_field]
@@ -706,7 +708,7 @@ class StandardSeriesPuller:
                             last_err = e
                             msg = str(e)
                             is_rl = _is_rate_limit_message(msg)
-                            if is_rl and (r + 1 == self.cfg.max_retries):
+                            if is_rl and (r + 1 == n_attempts):
                                 fld = ",".join([str(f) for f in field_list])
                                 print(
                                     f"[RATE_LIMIT] exhausted retries for id={universe_id} "

@@ -2,6 +2,28 @@
 
 This repository contains the code and analysis for my MSc Economics master thesis.
 
+## Environment (important)
+
+Use the project virtual environment for all Python commands.
+
+```bash
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -c "import pandas; print(pandas.__version__)"
+```
+
+Notes:
+- `.venv` is intentionally linked to `.venv_thesis` so tools can auto-detect the environment.
+- Prefer `python -m pip ...` to avoid mixing `pip` from a different interpreter.
+
+Optional auto-activation with direnv:
+
+```bash
+brew install direnv
+echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc
+direnv allow .
+```
+
 ## Notebooks
 
 - `Euro500_Portfolio.ipynb`: Builds and analyzes the Euro500 equity portfolio at the firm level.

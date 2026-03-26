@@ -2,3 +2,6 @@
 alt/
 
 *.html
+.venv
+.venv_thesis
+.direnv/

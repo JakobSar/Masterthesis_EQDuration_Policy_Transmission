@@ -136,6 +136,8 @@ def save_figure(fig, path, *, dpi: int = 150) -> None:
     try:
         plt.rcParams["font.family"] = "sans-serif"
         plt.rcParams["font.sans-serif"] = ["Alegreya Sans", "DejaVu Sans", "Arial"]
+        for txt in fig.texts:
+            txt.set_fontfamily("sans-serif")
         for ax in fig.get_axes():
             for txt in (
                 [ax.title, ax.xaxis.label, ax.yaxis.label]
@@ -154,6 +156,8 @@ def save_figure(fig, path, *, dpi: int = 150) -> None:
     finally:
         plt.rcParams["font.family"] = orig_family
         plt.rcParams["font.serif"] = orig_serif
+        for txt in fig.texts:
+            txt.set_fontfamily("serif")
         for ax in fig.get_axes():
             for txt in (
                 [ax.title, ax.xaxis.label, ax.yaxis.label]

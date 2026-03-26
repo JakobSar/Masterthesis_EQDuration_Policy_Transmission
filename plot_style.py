@@ -47,8 +47,13 @@ def set_global_plot_style() -> None:
     plt.rcParams["grid.alpha"] = 0.55
     plt.rcParams["grid.linewidth"] = 0.7
     plt.rcParams["axes.titlepad"] = 10
-    plt.rcParams["axes.titlesize"] = 13
+    plt.rcParams["axes.titlesize"] = 18
     plt.rcParams["axes.titleweight"] = "semibold"
+    plt.rcParams["axes.labelsize"] = 16
+    plt.rcParams["xtick.labelsize"] = 14
+    plt.rcParams["ytick.labelsize"] = 14
+    plt.rcParams["legend.fontsize"] = 14
+    plt.rcParams["legend.title_fontsize"] = 14
     plt.rcParams["lines.linewidth"] = 1.0
     plt.rcParams["axes.linewidth"] = 0.8
     plt.rcParams["patch.linewidth"] = 0.4
@@ -75,7 +80,7 @@ def style_axes(
     ax.spines["right"].set_visible(False)
     ax.spines["left"].set_color("#B8C2CC")
     ax.spines["bottom"].set_color("#B8C2CC")
-    ax.tick_params(axis="both", labelsize=10)
+    ax.tick_params(axis="both", labelsize=16)
     ax.yaxis.labelpad = 10
 
 
@@ -110,6 +115,59 @@ def style_time_axis(
     ax.set_xlim(mdates.num2date(x_min_num), mdates.num2date(x_max_num))
     ax.set_xticks(ticks)
     ax.xaxis.set_major_formatter(mdates.DateFormatter(date_fmt))
+    ax.set_xlabel("")
+    plt.setp(ax.get_xticklabels(), rotation=0, ha="center")
+
+
+def save_figure(fig, path, *, dpi: int = 150) -> None:
+    """Save *fig* to *path* (Times New Roman version) and a _beamer variant with Alegreya Sans.
+
+    *path* can be a str or Path; the extension is preserved as-is (defaults to .png if none).
+    The _beamer file is written next to the original with ``_beamer`` appended before the suffix.
+    """
+    from pathlib import Path
+
+    path = Path(path)
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+
+    beamer_path = path.with_stem(path.stem + "_beamer")
+    orig_family = plt.rcParams["font.family"]
+    orig_serif = list(plt.rcParams["font.serif"])
+    try:
+        plt.rcParams["font.family"] = "sans-serif"
+        plt.rcParams["font.sans-serif"] = ["Alegreya Sans", "DejaVu Sans", "Arial"]
+        for ax in fig.get_axes():
+            for txt in (
+                [ax.title, ax.xaxis.label, ax.yaxis.label]
+                + ax.get_xticklabels()
+                + ax.get_yticklabels()
+                + ax.texts
+            ):
+                txt.set_fontfamily("sans-serif")
+            leg = ax.get_legend()
+            if leg is not None:
+                for txt in leg.get_texts():
+                    txt.set_fontfamily("sans-serif")
+                if leg.get_title():
+                    leg.get_title().set_fontfamily("sans-serif")
+        fig.savefig(beamer_path, dpi=dpi, bbox_inches="tight")
+    finally:
+        plt.rcParams["font.family"] = orig_family
+        plt.rcParams["font.serif"] = orig_serif
+        for ax in fig.get_axes():
+            for txt in (
+                [ax.title, ax.xaxis.label, ax.yaxis.label]
+                + ax.get_xticklabels()
+                + ax.get_yticklabels()
+                + ax.texts
+            ):
+                txt.set_fontfamily("serif")
+            leg = ax.get_legend()
+            if leg is not None:
+                for txt in leg.get_texts():
+                    txt.set_fontfamily("serif")
+                if leg.get_title():
+                    leg.get_title().set_fontfamily("serif")
 
 
 def style_legend(ax, *, loc: str = "best", frameon: bool = True, title: str | None = None) -> None:

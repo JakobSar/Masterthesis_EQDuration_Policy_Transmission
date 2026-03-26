@@ -66,9 +66,6 @@ def style_axes(
     *,
     grid_axis: str = "y",
     grid_alpha: float = 0.25,
-    label_x: float = -0.04,
-    label_y: float = 0.5,
-    label_pad: int = 1,
 ) -> None:
     """Apply common axis formatting."""
     ax.set_xmargin(0)
@@ -79,8 +76,7 @@ def style_axes(
     ax.spines["left"].set_color("#B8C2CC")
     ax.spines["bottom"].set_color("#B8C2CC")
     ax.tick_params(axis="both", labelsize=10)
-    ax.yaxis.set_label_coords(label_x, label_y)
-    ax.yaxis.labelpad = label_pad
+    ax.yaxis.labelpad = 10
 
 
 def style_time_axis(

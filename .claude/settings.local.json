@@ -1,10 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3:*)",
-      "Bash(git:*)",
-      "Bash(ls:*)",
-      "Bash(jupyter:*)"
+      "Bash(*)",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch"
     ]
   }
 }

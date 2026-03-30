@@ -1,5 +1,8 @@
 .DS_Store
 alt/
+__pycache__/
+.jupyter_config/
+.claude/settings.local.json
 
 *.html
 .venv

@@ -133,6 +133,9 @@ def save_figure(fig, path, *, dpi: int = 150) -> None:
     beamer_path = path.with_stem(path.stem + "_beamer")
     orig_family = plt.rcParams["font.family"]
     orig_serif = list(plt.rcParams["font.serif"])
+    # Track original font sizes of star annotations so we can restore them
+    _star_orig_sizes = {}
+    _STAR_SCALE = 1.4  # scale factor for significance stars in beamer variant
     try:
         plt.rcParams["font.family"] = "sans-serif"
         plt.rcParams["font.sans-serif"] = ["Alegreya Sans", "DejaVu Sans", "Arial"]
@@ -146,6 +149,12 @@ def save_figure(fig, path, *, dpi: int = 150) -> None:
                 + ax.texts
             ):
                 txt.set_fontfamily("sans-serif")
+            # Enlarge significance star annotations for beamer readability
+            for txt in ax.texts:
+                if txt.get_text().strip().replace("*", "") == "":
+                    orig_size = txt.get_fontsize()
+                    _star_orig_sizes[id(txt)] = orig_size
+                    txt.set_fontsize(orig_size * _STAR_SCALE)
             leg = ax.get_legend()
             if leg is not None:
                 for txt in leg.get_texts():
@@ -166,6 +175,10 @@ def save_figure(fig, path, *, dpi: int = 150) -> None:
                 + ax.texts
             ):
                 txt.set_fontfamily("serif")
+            # Restore original star sizes
+            for txt in ax.texts:
+                if id(txt) in _star_orig_sizes:
+                    txt.set_fontsize(_star_orig_sizes[id(txt)])
             leg = ax.get_legend()
             if leg is not None:
                 for txt in leg.get_texts():

@@ -124,11 +124,37 @@ def save_figure(fig, path, *, dpi: int = 150) -> None:
 
     *path* can be a str or Path; the extension is preserved as-is (defaults to .png if none).
     The _beamer file is written next to the original with ``_beamer`` appended before the suffix.
+
+    The main (non-beamer) variant is saved WITHOUT axis titles (the LaTeX document
+    adds the title). The beamer variant keeps the title and lifts it further above
+    the axes for better readability on slides.
     """
     from pathlib import Path
 
     path = Path(path)
-    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+
+    # --- Main variant: strip titles, save, then restore ---
+    _saved_titles = []
+    for ax in fig.get_axes():
+        _saved_titles.append((ax, ax.get_title(), ax.get_title(loc="left"), ax.get_title(loc="right")))
+        ax.set_title("")
+        ax.set_title("", loc="left")
+        ax.set_title("", loc="right")
+    _saved_suptitle = None
+    if getattr(fig, "_suptitle", None) is not None:
+        _saved_suptitle = fig._suptitle.get_text()
+        fig.suptitle("")
+    try:
+        fig.savefig(path, dpi=dpi, bbox_inches="tight")
+    finally:
+        for ax, t_center, t_left, t_right in _saved_titles:
+            ax.set_title(t_center)
+            if t_left:
+                ax.set_title(t_left, loc="left")
+            if t_right:
+                ax.set_title(t_right, loc="right")
+        if _saved_suptitle is not None:
+            fig.suptitle(_saved_suptitle)
 
     beamer_path = path.with_stem(path.stem + "_beamer")
     orig_family = plt.rcParams["font.family"]
@@ -136,9 +162,15 @@ def save_figure(fig, path, *, dpi: int = 150) -> None:
     # Track original font sizes of star annotations so we can restore them
     _star_orig_sizes = {}
     _STAR_SCALE = 1.4  # scale factor for significance stars in beamer variant
+    _BEAMER_TITLE_PAD = 22  # extra space between axis title and plot for beamer
+    _orig_title_pads = {}
     try:
         plt.rcParams["font.family"] = "sans-serif"
         plt.rcParams["font.sans-serif"] = ["Alegreya Sans", "DejaVu Sans", "Arial"]
+        for ax in fig.get_axes():
+            _orig_title_pads[id(ax)] = ax.title.get_position()
+            # Lift the title further above the axes
+            ax.set_title(ax.get_title(), pad=_BEAMER_TITLE_PAD)
         for txt in fig.texts:
             txt.set_fontfamily("sans-serif")
         for ax in fig.get_axes():
@@ -165,6 +197,9 @@ def save_figure(fig, path, *, dpi: int = 150) -> None:
     finally:
         plt.rcParams["font.family"] = orig_family
         plt.rcParams["font.serif"] = orig_serif
+        # Restore original title pad
+        for ax in fig.get_axes():
+            ax.set_title(ax.get_title(), pad=plt.rcParams["axes.titlepad"])
         for txt in fig.texts:
             txt.set_fontfamily("serif")
         for ax in fig.get_axes():

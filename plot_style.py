@@ -133,13 +133,7 @@ def save_figure(fig, path, *, dpi: int = 150) -> None:
 
     path = Path(path)
 
-    # --- Main variant: strip titles, save, then restore ---
-    _saved_titles = []
-    for ax in fig.get_axes():
-        _saved_titles.append((ax, ax.get_title(), ax.get_title(loc="left"), ax.get_title(loc="right")))
-        ax.set_title("")
-        ax.set_title("", loc="left")
-        ax.set_title("", loc="right")
+    # --- Main variant: strip suptitle only, keep subplot titles, save, then restore ---
     _saved_suptitle = None
     if getattr(fig, "_suptitle", None) is not None:
         _saved_suptitle = fig._suptitle.get_text()
@@ -147,12 +141,6 @@ def save_figure(fig, path, *, dpi: int = 150) -> None:
     try:
         fig.savefig(path, dpi=dpi, bbox_inches="tight")
     finally:
-        for ax, t_center, t_left, t_right in _saved_titles:
-            ax.set_title(t_center)
-            if t_left:
-                ax.set_title(t_left, loc="left")
-            if t_right:
-                ax.set_title(t_right, loc="right")
         if _saved_suptitle is not None:
             fig.suptitle(_saved_suptitle)
 

@@ -2,7 +2,8 @@
 alt/
 __pycache__/
 .jupyter_config/
-.claude/settings.local.json
+.claude/
+CLAUDE.md
 
 *.html
 .venv

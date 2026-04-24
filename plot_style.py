@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import glob
+import os
 from collections.abc import Iterable
 from datetime import datetime
 
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from matplotlib import font_manager
 from cycler import cycler
 
 MIN_PLOT_DATE = datetime(1998, 1, 1)
@@ -30,20 +33,79 @@ COLORS = {
 }
 
 
+_TEX_FONTS_REGISTERED = False
+
+
+def _register_tex_fonts() -> None:
+    """Register TeX Gyre Termes and Nimbus Roman from a local TeXLive install.
+
+    The LaTeX thesis uses ``\\usepackage{mathptmx}``, which typesets the body
+    text in URW Nimbus Roman No. 9 L (the free PostScript-Times clone). macOS's
+    "Times New Roman" renders noticeably thinner at typical figure DPI, so we
+    point matplotlib at the exact same OpenType files that TeXLive ships —
+    TeX Gyre Termes (Nimbus with extended glyph coverage) and Nimbus Roman
+    itself — whenever they are available on disk. Silent no-op if they aren't.
+    """
+    global _TEX_FONTS_REGISTERED
+    if _TEX_FONTS_REGISTERED:
+        return
+
+    # Cover TeXLive (any year), MacTeX per-user and system installs, and Linux distros.
+    candidate_patterns = [
+        "/usr/local/texlive/*/texmf-dist/fonts/opentype/public/tex-gyre/texgyretermes-*.otf",
+        "/usr/local/texlive/*/texmf-dist/fonts/opentype/urw/NimbusRoman-*.otf",
+        "~/Library/texlive/*/texmf-dist/fonts/opentype/public/tex-gyre/texgyretermes-*.otf",
+        "~/Library/texlive/*/texmf-dist/fonts/opentype/urw/NimbusRoman-*.otf",
+        "/Library/TeX/Root/texmf-dist/fonts/opentype/public/tex-gyre/texgyretermes-*.otf",
+        "/Library/TeX/Root/texmf-dist/fonts/opentype/urw/NimbusRoman-*.otf",
+        "/usr/share/texmf/fonts/opentype/public/tex-gyre/texgyretermes-*.otf",
+        "/usr/share/fonts/opentype/urw-base35/NimbusRoman-*.otf",
+    ]
+    for pattern in candidate_patterns:
+        for path in glob.glob(os.path.expanduser(pattern)):
+            try:
+                font_manager.fontManager.addfont(path)
+            except Exception:
+                # Never let font registration break plotting.
+                pass
+    _TEX_FONTS_REGISTERED = True
+
+
 def set_global_plot_style() -> None:
     """Set notebook-wide matplotlib defaults."""
+    _register_tex_fonts()
     plt.rcParams["font.family"] = "serif"
-    plt.rcParams["font.serif"] = ["Times New Roman", "Times", "DejaVu Serif"]
+    # Prefer TeX Gyre Termes / Nimbus Roman — matches the thesis body font set
+    # via \usepackage{mathptmx}. Times New Roman / Times / DejaVu Serif act as
+    # fallbacks if neither TeXLive font is installed on the system.
+    plt.rcParams["font.serif"] = [
+        "TeX Gyre Termes",
+        "Nimbus Roman",
+        "Times New Roman",
+        "Times",
+        "DejaVu Serif",
+    ]
     plt.rcParams["figure.facecolor"] = "white"
     plt.rcParams["axes.facecolor"] = "#FAFBFC"
-    plt.rcParams["axes.edgecolor"] = "#B8C2CC"
-    plt.rcParams["axes.labelcolor"] = "#243447"
-    plt.rcParams["xtick.color"] = "#2B3A42"
-    plt.rcParams["ytick.color"] = "#2B3A42"
+    # Plot chrome (spines, tick marks, grid) kept light so the black text
+    # dominates — matches the AER/JFE/QJE figure look.
+    plt.rcParams["axes.edgecolor"] = "#C4CDD7"
+    plt.rcParams["axes.labelcolor"] = "#000000"
+    plt.rcParams["axes.titlecolor"] = "#000000"
+    plt.rcParams["xtick.color"] = "#C4CDD7"        # tick marks match spines
+    plt.rcParams["ytick.color"] = "#C4CDD7"        # tick marks match spines
+    # Tick *labels* in black (same ink as body text). Older matplotlib (<3.4)
+    # has no separate labelcolor key; in that case fall back to all-black ticks.
+    try:
+        plt.rcParams["xtick.labelcolor"] = "#000000"
+        plt.rcParams["ytick.labelcolor"] = "#000000"
+    except KeyError:
+        plt.rcParams["xtick.color"] = "#000000"
+        plt.rcParams["ytick.color"] = "#000000"
     plt.rcParams["axes.grid"] = False
     plt.rcParams["axes.xmargin"] = 0.0
     plt.rcParams["axes.autolimit_mode"] = "data"
-    plt.rcParams["grid.color"] = "#D5DDE5"
+    plt.rcParams["grid.color"] = "#E0E5EB"
     plt.rcParams["grid.alpha"] = 0.55
     plt.rcParams["grid.linewidth"] = 0.7
     plt.rcParams["axes.titlepad"] = 10
@@ -78,8 +140,8 @@ def style_axes(
     ax.grid(axis=grid_axis, alpha=grid_alpha)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-    ax.spines["left"].set_color("#B8C2CC")
-    ax.spines["bottom"].set_color("#B8C2CC")
+    ax.spines["left"].set_color("#C4CDD7")
+    ax.spines["bottom"].set_color("#C4CDD7")
     ax.tick_params(axis="both", labelsize=16)
     ax.yaxis.labelpad = 10
 
@@ -119,8 +181,8 @@ def style_time_axis(
     plt.setp(ax.get_xticklabels(), rotation=0, ha="center")
 
 
-def save_figure(fig, path, *, dpi: int = 150) -> None:
-    """Save *fig* to *path* (Times New Roman version) and a _beamer variant with Alegreya Sans.
+def save_figure(fig, path, *, dpi: int = 300) -> None:
+    """Save *fig* to *path* (TeX Gyre Termes, i.e. the thesis body font) and a _beamer variant with Alegreya Sans.
 
     *path* can be a str or Path; the extension is preserved as-is (defaults to .png if none).
     The _beamer file is written next to the original with ``_beamer`` appended before the suffix.

@@ -1393,6 +1393,7 @@ def _dr_update_company_cache(
     id_type: str | None,
     force_refresh: bool,
     seed_returns: pd.DataFrame | None,
+    skip_lseg_pull: bool = False,
 ) -> tuple[pd.DataFrame, str | None, str | None]:
     path = _dr_cache_path(cache_dir, firm_id)
     cached = pd.DataFrame(columns=["date", "ret"]) if force_refresh else _dr_load_cache(path)
@@ -1400,6 +1401,11 @@ def _dr_update_company_cache(
     if not seed.empty:
         frames = [x for x in [cached, seed] if not x.empty]
         cached = pd.concat(frames, ignore_index=True).sort_values("date").drop_duplicates(subset=["date"], keep="last") if frames else pd.DataFrame(columns=["date", "ret"])
+
+    # Cache-only mode: short-circuit before computing missing segments and never call LSEG.
+    if skip_lseg_pull:
+        clipped = cached.loc[(cached["date"] >= start) & (cached["date"] <= end)].copy() if not cached.empty else cached
+        return clipped, ("cache" if not clipped.empty else None), ("cache_only" if not clipped.empty else None)
 
     segments: list[tuple[pd.Timestamp, pd.Timestamp]] = []
     if cached.empty:
@@ -1620,6 +1626,7 @@ def _run_daily_returns_internal(
                             id_type=cand_type,
                             force_refresh=cfg.force_refresh,
                             seed_returns=seed,
+                            skip_lseg_pull=cfg.skip_lseg_pull,
                         )
                     except Exception as e:
                         if _dr_is_rate_limit_message(str(e)):

@@ -6,6 +6,5 @@ __pycache__/
 CLAUDE.md
 
 *.html
-.venv
 .venv_thesis
 .direnv/

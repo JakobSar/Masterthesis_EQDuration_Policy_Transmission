@@ -1,4 +1,4 @@
-# Equity Duration and the Monetary Policy Transmission
+# The Equity Duration Channel of ECB Monetary Policy Transmission
 
 This repository contains the code, data pipeline, and empirical analysis for my MSc Economics master's thesis. The project estimates firm-level equity duration for a European large-cap universe ("Euro500") and studies how duration shapes the transmission of ECB monetary policy shocks to equity returns.
 
@@ -6,9 +6,9 @@ This repository contains the code, data pipeline, and empirical analysis for my 
 
 The pipeline is organized into four stages:
 
-1. **Universe & portfolio construction** — build the Euro500 firm universe from STOXX Europe 600 membership, and compute daily returns and an index benchmark.
+1. **Universe & portfolio construction** — build the Euro500 firm universe via a quarterly LSEG Workspace screen of euro-area HQ firms (top 500 by closing market cap, rebalanced quarterly), and compute daily returns and an index benchmark.
 2. **LSEG data pulls** — fetch fundamentals, analyst forecasts, and daily prices from Refinitiv/LSEG `lseg-data` with batching, caching, and resume/checkpoint support.
-3. **Equity duration estimation** — compute duration measures using (a) a net-payout approach, (b) an analyst-forecast-based clean-surplus framework with Jensen-inequality corrections, and (c) simpler proxies for robustness (shareholder yield, B/M, E/P).
+3. **Equity duration estimation** — compute duration measures using (a) the Gonçalves (2021) VAR-based net-payout approach, (b) an analyst-forecast-based weighted-average maturity (Macaulay WAM with linear ROE reversion à la Gebhardt et al. 2001), and (c) simpler proxies for robustness (shareholder yield, B/M, E/P, expected payback period).
 4. **Regressions** — estimate firm-level panel regressions and index-level regressions of equity returns on high-frequency ECB monetary policy shocks, interacted with equity duration.
 
 ## Repository structure
@@ -35,12 +35,12 @@ Run notebooks in the order below; each stage consumes the outputs of the previou
 
 ### 2. LSEG data pulls
 - [LSEG_DataPull_Netpayout.ipynb](LSEG_DataPull_Netpayout.ipynb) — pulls the LSEG raw inputs (balance-sheet, income-statement, cashflow/payout items) required for net-payout-based duration.
-- [LSEG_DataPull_AnalystBased.ipynb](LSEG_DataPull_AnalystBased.ipynb) — pulls analyst consensus forecast data (EPS FY1–FY5, long-term growth, DPS) for the Euro500 firm universe.
+- [LSEG_DataPull_AnalystBased.ipynb](LSEG_DataPull_AnalystBased.ipynb) — pulls analyst consensus forecast data (EPS FY1–FY3, DPS FY1–FY3, NumberOfAnalysts FY1–FY5, long-term growth) for the Euro500 firm universe.
 
 ### 3. Equity duration
 - [EQDuration_NetPayout.ipynb](EQDuration_NetPayout.ipynb) — computes equity duration using a net-payout approach.
 - [EQDuration_AnalystBased.ipynb](EQDuration_AnalystBased.ipynb) — computes equity duration from analyst consensus forecasts using the clean-surplus framework with Jensen-inequality corrections.
-- [EQDuration_Robustness.ipynb](EQDuration_Robustness.ipynb) — computes alternative equity duration proxies using shareholder yield, book-to-market ratio, and earnings-to-price ratio.
+- [EQDuration_Robustness.ipynb](EQDuration_Robustness.ipynb) — computes alternative equity duration proxies: shareholder yield (gross + dividends-only), book-to-market, earnings-to-price, and expected payback period (EPP, AR(1)-based).
 
 ### 4. Regressions
 - [ECBShocks_Equities_Regressions.ipynb](ECBShocks_Equities_Regressions.ipynb) — firm-level panel regressions of ECB monetary policy shocks on equity returns with duration interactions.
@@ -88,17 +88,19 @@ Intermediate parquet files written to `Project_Data/intermediate/` (selection):
 
 | File | Produced by | Content |
 |---|---|---|
-| `stoxx600_membership_matrix_1999_2025_eurohq.parquet` | Portfolio construction | STOXX 600 membership matrix, Euro-HQ firms |
-| `euro500.parquet` | `Euro500_Portfolio.ipynb` | Euro500 firm universe |
-| `euro500_daily_returns.parquet` | `LSEG_DataPull_DailyReturns.ipynb` | Firm-level daily returns |
-| `euro500_index_returns.parquet` | `Euro500_IndexReturns.ipynb` | Euro500 index benchmark returns |
-| `euro500_netpayout.parquet` | `LSEG_DataPull_Netpayout.ipynb` | Balance-sheet / income / payout inputs |
-| `euro500_analystbased.parquet` | `LSEG_DataPull_AnalystBased.ipynb` | Analyst consensus inputs |
-| `EQDuration_NetPayout.parquet` | `EQDuration_NetPayout.ipynb` | Net-payout-based duration |
-| `EQDuration_Fcst.parquet` | `EQDuration_AnalystBased.ipynb` | Analyst-forecast-based duration |
-| `EQDuration_Robustness.parquet` | `EQDuration_Robustness.ipynb` | Robustness proxies |
-| `shocks_ecb_mpd_me_d.csv` | External input | High-frequency ECB monetary policy shocks |
-| `rates_2yOIS_daily.parquet` | External input | Euro-area 2y OIS rates |
+| `stoxx600_membership_`<br>`matrix_1999_2025_`<br>`eurohq.parquet` | Portfolio construction | STOXX 600 membership matrix, Euro-HQ firms (used only for benchmark comparison) |
+| `euro500.parquet` | `Euro500_Portfolio.ipynb` | Euro500 firm universe (quarterly constituents) |
+| `firm_id_token_map.`<br>`parquet` | `Euro500_Portfolio.ipynb` | Mapping of all historical ISINs/RICs/SEDOLs per `firm_id` |
+| `daily_returns_`<br>`company_all.parquet` | `LSEG_DataPull_`<br>`DailyReturns.ipynb` | Firm-level daily returns (full pull, incl. beta-lookback period) |
+| `euro500_daily_`<br>`returns.parquet` | `LSEG_DataPull_`<br>`DailyReturns.ipynb` | Firm-level daily returns, filtered to in-index dates |
+| `euro500_index_`<br>`returns.parquet` | `Euro500_IndexReturns.`<br>`ipynb` | Euro500 index benchmark returns |
+| `euro500_netpayout.`<br>`parquet` | `LSEG_DataPull_`<br>`Netpayout.ipynb` | Balance-sheet / income / payout / market-cap inputs |
+| `euro500_analyst`<br>`based.parquet` | `LSEG_DataPull_`<br>`AnalystBased.ipynb` | Analyst consensus inputs |
+| `EQDuration_`<br>`Netpayout.parquet` | `EQDuration_`<br>`NetPayout.ipynb` | Net-payout-based duration (NpD) |
+| `EQDuration_Fcst.`<br>`parquet` | `EQDuration_`<br>`AnalystBased.ipynb` | Analyst-forecast-based duration (FcstD) |
+| `EQDuration_`<br>`Robustness.parquet` | `EQDuration_`<br>`Robustness.ipynb` | Robustness proxies (SY, B/M, E/P, EPP) |
+| `shocks_jk2020_*.csv` | External input | Jarociński-Karadi (2020) ECB shock series, updated by Jarociński (`jkshocks_update_ecb` GitHub repo) |
+| `rates_2yOIS_daily.`<br>`parquet` | External input | Euro-area 2y OIS rates |
 
 The `cache/` subdirectory holds per-firm parquet caches used by the LSEG pullers to avoid re-fetching unchanged (firm, date) combinations.
 
@@ -108,9 +110,9 @@ From a clean state (valid LSEG credentials and input shock/rate files in place):
 
 1. `Euro500_Portfolio.ipynb`
 2. `LSEG_DataPull_DailyReturns.ipynb` → `Euro500_IndexReturns.ipynb`
-3. `LSEG_DataPull_Netpayout.ipynb` and `LSEG_DataPull_AnalystBased.ipynb`
-4. `EQDuration_NetPayout.ipynb`, `EQDuration_AnalystBased.ipynb`, `EQDuration_Robustness.ipynb`
-5. `ECBShocks_Equities_Regressions.ipynb`, `ECBShocks_Index_Regressions.ipynb`
+3. `LSEG_DataPull_Netpayout.ipynb`, then `LSEG_DataPull_AnalystBased.ipynb` (the latter merges BE/ME from `euro500_netpayout.parquet`)
+4. `EQDuration_NetPayout.ipynb`, then `EQDuration_AnalystBased.ipynb` (FcstD merges NpD from `EQDuration_Netpayout.parquet` for diagnostics), then `EQDuration_Robustness.ipynb`
+5. `ECBShocks_Equities_Regressions.ipynb` (firm-level panel) and `ECBShocks_Index_Regressions.ipynb` (index-level; aggregates firm-level NpD to a yearly market-duration series — depends on `EQDuration_NetPayout` output, not on the firm-level regressions notebook)
 
 LSEG rate limiting: the data layer enforces a shared quota across steps. If a pull returns HTTP 429, wait 5–10 minutes and resume — each puller checkpoints and skips already-cached (firm, date) combinations.
 
@@ -122,7 +124,7 @@ Raw LSEG / Refinitiv data is proprietary and cannot be redistributed. The reposi
 
 If you use this code, please cite the thesis:
 
-> Sarrazin, J. *Equity Duration and the Monetary Policy Transmission.* MSc Economics master's thesis.
+> Sarrazin, J. *The Equity Duration Channel of ECB Monetary Policy Transmission.* MSc Economics master's thesis.
 
 ## License
 

@@ -86,21 +86,24 @@ direnv allow .
 
 Intermediate parquet files written to `Project_Data/intermediate/` (selection):
 
-| File | Produced by | Content |
-|---|---|---|
-| `stoxx600_membership_`<br>`matrix_1999_2025_`<br>`eurohq.parquet` | Portfolio construction | STOXX 600 membership matrix, Euro-HQ firms (used only for benchmark comparison) |
-| `euro500.parquet` | `Euro500_Portfolio.ipynb` | Euro500 firm universe (quarterly constituents) |
-| `firm_id_token_map.`<br>`parquet` | `Euro500_Portfolio.ipynb` | Mapping of all historical ISINs/RICs/SEDOLs per `firm_id` |
-| `daily_returns_`<br>`company_all.parquet` | `LSEG_DataPull_`<br>`DailyReturns.ipynb` | Firm-level daily returns (full pull, incl. beta-lookback period) |
-| `euro500_daily_`<br>`returns.parquet` | `LSEG_DataPull_`<br>`DailyReturns.ipynb` | Firm-level daily returns, filtered to in-index dates |
-| `euro500_index_`<br>`returns.parquet` | `Euro500_IndexReturns.`<br>`ipynb` | Euro500 index benchmark returns |
-| `euro500_netpayout.`<br>`parquet` | `LSEG_DataPull_`<br>`Netpayout.ipynb` | Balance-sheet / income / payout / market-cap inputs |
-| `euro500_analyst`<br>`based.parquet` | `LSEG_DataPull_`<br>`AnalystBased.ipynb` | Analyst consensus inputs |
-| `EQDuration_`<br>`Netpayout.parquet` | `EQDuration_`<br>`NetPayout.ipynb` | Net-payout-based duration (NpD) |
-| `EQDuration_Fcst.`<br>`parquet` | `EQDuration_`<br>`AnalystBased.ipynb` | Analyst-forecast-based duration (FcstD) |
-| `EQDuration_`<br>`Robustness.parquet` | `EQDuration_`<br>`Robustness.ipynb` | Robustness proxies (SY, B/M, E/P, EPP) |
-| `shocks_jk2020_*.csv` | External input | Jarociński-Karadi (2020) ECB shock series, updated by Jarociński (`jkshocks_update_ecb` GitHub repo) |
-| `rates_2yOIS_daily.`<br>`parquet` | External input | Euro-area 2y OIS rates |
+**Pipeline outputs** (`euro500_*.parquet`, `EQDuration_*.parquet`):
+
+- `euro500.parquet` — quarterly Euro500 constituents (`Euro500_Portfolio.ipynb`)
+- `firm_id_token_map.parquet` — mapping of historical ISINs/RICs/SEDOLs per `firm_id` (`Euro500_Portfolio.ipynb`)
+- `daily_returns_company_all.parquet` — firm-level daily returns, full pull incl. beta-lookback (`LSEG_DataPull_DailyReturns.ipynb`)
+- `euro500_daily_returns.parquet` — firm-level daily returns, in-index only (`LSEG_DataPull_DailyReturns.ipynb`)
+- `euro500_index_returns.parquet` — Euro500 index benchmark returns (`Euro500_IndexReturns.ipynb`)
+- `euro500_netpayout.parquet` — balance-sheet / income / payout / market-cap inputs (`LSEG_DataPull_Netpayout.ipynb`)
+- `euro500_analystbased.parquet` — analyst consensus inputs (`LSEG_DataPull_AnalystBased.ipynb`)
+- `EQDuration_Netpayout.parquet` — net-payout-based duration NpD (`EQDuration_NetPayout.ipynb`)
+- `EQDuration_Fcst.parquet` — analyst-forecast-based duration FcstD (`EQDuration_AnalystBased.ipynb`)
+- `EQDuration_Robustness.parquet` — robustness proxies SY, B/M, E/P, EPP (`EQDuration_Robustness.ipynb`)
+
+**External inputs**:
+
+- `stoxx600_membership_matrix_1999_2025_eurohq.parquet` — STOXX 600 membership (used only for benchmark comparison plots)
+- `shocks_jk2020_*.csv` — Jarociński-Karadi (2020) ECB shock series, updated by Jarociński via [`jkshocks_update_ecb`](https://github.com/marekjarocinski/jkshocks_update_ecb)
+- `rates_2yOIS_daily.parquet` — Euro-area 2y OIS rates
 
 The `cache/` subdirectory holds per-firm parquet caches used by the LSEG pullers to avoid re-fetching unchanged (firm, date) combinations.
 
@@ -128,4 +131,4 @@ If you use this code, please cite the thesis:
 
 ## License
 
-Code in this repository is released under the MIT License (see `LICENSE` once added). Underlying market data from LSEG/Refinitiv and the ECB EA-MPD are subject to their respective providers' terms.
+Code in this repository is released under the MIT License (see [`LICENSE`](LICENSE)). Underlying market data from LSEG/Refinitiv and the ECB EA-MPD are subject to their respective providers' terms.
